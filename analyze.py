@@ -5,7 +5,7 @@ from google import genai
 from google.genai import types
 import yfinance as yf
 
-# 1. API 키 확인 및 최신 클라이언트 생성
+# 1. API 키 확인 및 클라이언트 생성
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
   print("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
@@ -40,14 +40,14 @@ market_context = {
     "cny_current_usd": cny_curr,
 }
 
-# 3. 프롬프트 생성
+# 3. 프롬프트 구성
 prompt = f"""
 당신은 원자재 가격 분석 전문 AI입니다. 아래 공개 시황 데이터를 바탕으로 향후 6개월간 전기동(구리) 가격 및 수급 전망을 분석하세요.
 
 [시장 데이터]
 {json.dumps(market_context, ensure_ascii=False)}
 
-반드시 아래 JSON 스키마 형식으로만 출력하세요:
+반드시 마크다운 코드블록(```json) 없이 순수 JSON 포맷으로만 응답하세요:
 {{
   "update_date": "{market_context['latest_date']}",
   "current_price": {market_context['copper_current_usd_lb']},
@@ -67,10 +67,10 @@ prompt = f"""
 }}
 """
 
-# 4. 최신 Gemini 2.5 Flash 호출 (JSON Mode)
+# 4. Gemini 3.6 Flash 호출
 try:
   response = client.models.generate_content(
-      model="gemini-2.5-flash",
+      model="gemini-3.6-flash",
       contents=prompt,
       config=types.GenerateContentConfig(
           response_mime_type="application/json",
