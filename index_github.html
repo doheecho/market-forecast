@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <title>핵심 19종 원자재 AI 가격 전망</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root { --samsung-blue: #1428A0; --bg-color: #f4f7f9; }
+    body { background-color: var(--bg-color); font-family: 'Noto Sans KR', sans-serif; padding: 20px; }
+    .header-bar { background: var(--samsung-blue); color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+    .cat-btn { font-size: 0.9rem; font-weight: 600; padding: 6px 16px; border-radius: 20px; margin-right: 8px; border: 1px solid #dee2e6; background-color: white; color: #555; }
+    .cat-btn.active { background-color: var(--samsung-blue) !important; color: white !important; border-color: var(--samsung-blue) !important; }
+    .nav-pills .nav-link { color: #555; font-weight: 500; border-radius: 8px; margin-right: 5px; cursor: pointer; border: 1px solid #e0e0e0; background: white; margin-bottom: 8px; }
+    .nav-pills .nav-link.active { background-color: var(--samsung-blue) !important; color: white !important; border-color: var(--samsung-blue) !important; }
+    .card-custom { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e0e0e0; padding: 25px; margin-bottom: 20px; }
+    .stat-badge { font-size: 0.85rem; padding: 5px 10px; border-radius: 6px; font-weight: 600; }
+    .rationale-box { background-color: #f8faff; border-left: 4px solid var(--samsung-blue); padding: 15px 20px; border-radius: 4px; margin-top: 20px; }
+    .chart-container { position: relative; height: 420px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div class="container-fluid">
+    <div class="header-bar">
+      <div>
+        <h4 class="m-0 fw-bold">🌐 핵심 19종 원자재 AI 시황 및 6개월 가격 예측</h4>
+        <small class="opacity-75">글로벌 벤치마크 거래소 규격 연계 + 다변량 AI 시나리오 예측 모델</small>
+      </div>
+      <div id="update-badge" class="badge bg-light text-dark fs-6">기준일: -</div>
+    </div>
+
+    <!-- 대분류 필터 스위치 -->
+    <div class="mb-4 d-flex align-items-center flex-wrap gap-2">
+      <span class="fw-bold me-2 text-secondary" style="font-size: 0.95rem;">품목 대분류:</span>
+      <button class="cat-btn active" onclick="filterCategory('all', this)">전체 품목</button>
+      <button class="cat-btn" onclick="filterCategory('petro', this)">석유/폴리머</button>
+      <button class="cat-btn" onclick="filterCategory('metal', this)">비철/마이너 메탈</button>
+      <button class="cat-btn" onclick="filterCategory('steel', this)">철강/STS 제품</button>
+      <button class="cat-btn" onclick="filterCategory('precious', this)">귀금속/금은류</button>
+    </div>
+
+    <!-- 19종 세부 탭 네비게이션 -->
+    <ul class="nav nav-pills mb-4" id="commodityTabs">
+      <!-- 석유/폴리머 -->
+      <li class="nav-item" data-cat="petro"><button class="nav-link active" onclick="switchCommodity('wti', this)">WTI 원유</button></li>
+      <li class="nav-item" data-cat="petro"><button class="nav-link" onclick="switchCommodity('ldpe', this)">LDPE Film</button></li>
+      <li class="nav-item" data-cat="petro"><button class="nav-link" onclick="switchCommodity('pvc', this)">PVC</button></li>
+      <li class="nav-item" data-cat="petro"><button class="nav-link" onclick="switchCommodity('abs', this)">ABS Injection</button></li>
+      <li class="nav-item" data-cat="petro"><button class="nav-link" onclick="switchCommodity('pc', this)">PC (1100)</button></li>
+      
+      <!-- 비철/마이너 -->
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('copper', this)">전기동</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('aluminum', this)">알루미늄</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('nickel', this)">니켈</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('zinc', this)">아연</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('magnesium', this)">마그네슘</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('silicon', this)">실리콘 Ferro</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('chromium', this)">크롬 Ferro</button></li>
+      <li class="nav-item" data-cat="metal"><button class="nav-link" onclick="switchCommodity('tungsten', this)">텅스텐 Ferro</button></li>
+      
+      <!-- 철강/STS -->
+      <li class="nav-item" data-cat="steel"><button class="nav-link" onclick="switchCommodity('wire_rod', this)">선재</button></li>
+      <li class="nav-item" data-cat="steel"><button class="nav-link" onclick="switchCommodity('h_beam', this)">H형강</button></li>
+      <li class="nav-item" data-cat="steel"><button class="nav-link" onclick="switchCommodity('sts304', this)">STS 304</button></li>
+      
+      <!-- 귀금속 -->
+      <li class="nav-item" data-cat="precious"><button class="nav-link" onclick="switchCommodity('gold', this)">금</button></li>
+      <li class="nav-item" data-cat="precious"><button class="nav-link" onclick="switchCommodity('silver', this)">은</button></li>
+      <li class="nav-item" data-cat="precious"><button class="nav-link" onclick="switchCommodity('platinum', this)">백금</button></li>
+    </ul>
+
+    <!-- 메인 대시보드 카드 -->
+    <div class="card-custom">
+      <div id="loading" class="text-center py-5">
+        <div class="spinner-border text-primary" role="status"></div>
+        <p class="mt-3 text-muted">핵심 19종 원자재 시계열 및 예측 데이터를 실시간 분석 중입니다...</p>
+      </div>
+
+      <div id="dashboard-content" style="display: none;">
+        <!-- 상단 핵심 KPI 요약 -->
+        <div class="row text-center mb-4 g-3">
+          <div class="col-md-3">
+            <div class="p-3 border rounded bg-light">
+              <div class="text-muted small">현재가</div>
+              <h4 class="fw-bold my-1 text-dark" id="kpi-current">-</h4>
+              <small class="text-muted" id="kpi-unit">-</small>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="p-3 border rounded bg-light">
+              <div class="text-muted small">6개월 후 AI 목표가</div>
+              <h4 class="fw-bold my-1 text-danger" id="kpi-target">-</h4>
+              <span id="kpi-rate" class="stat-badge bg-danger text-white">+0.0%</span>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="p-3 border rounded bg-light">
+              <div class="text-muted small">전망 방향성</div>
+              <h4 class="fw-bold my-1 text-primary" id="kpi-direction">-</h4>
+              <small class="text-muted">추세 지속</small>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <div class="p-3 border rounded bg-light">
+              <div class="text-muted small">가격 변동성 지수</div>
+              <h4 class="fw-bold my-1 text-warning" id="kpi-volatility">-</h4>
+              <small class="text-muted">/ 100 pt</small>
+            </div>
+          </div>
+        </div>
+
+        <!-- 과거 3년 + 미래 6개월 통합 차트 -->
+        <div class="chart-container">
+          <canvas id="mainChart"></canvas>
+        </div>
+
+        <!-- 하단 AI 산정 근거 및 인사이트 -->
+        <div class="rationale-box">
+          <h6 class="fw-bold text-dark d-flex align-items-center">
+            <span class="me-2">💡</span> AI 예측 산정 근거 (Quant & Supply/Demand Analysis)
+          </h6>
+          <p id="rationale-text" class="text-secondary mb-0" style="line-height: 1.6; font-size: 0.95rem;">-</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let globalData = null;
+    let currentChart = null;
+    let selectedKey = 'wti';
+
+    // GitHub 정적 호스팅 전용 Fetch 파이프라인
+    document.addEventListener("DOMContentLoaded", function() {
+      const rawUrl = "https://raw.githubusercontent.com/doheecho/market-forecast/refs/heads/main/raw_materials_forecast.json";
+      const requestUrl = rawUrl + "?t=" + new Date().getTime(); // 캐시 버스팅
+
+      fetch(requestUrl)
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("HTTP 상태 에러 " + response.status);
+          }
+          return response.json();
+        })
+        .then(data => {
+          globalData = data;
+          document.getElementById("loading").style.display = "none";
+          document.getElementById("dashboard-content").style.display = "block";
+          document.getElementById("update-badge").innerText = "기준일: " + (globalData.update_date || '-');
+          
+          renderDashboard(selectedKey);
+        })
+        .catch(err => {
+          document.getElementById("loading").innerHTML = `
+            <div class="alert alert-danger" role="alert">
+              <strong>데이터 로드 오류:</strong> 깃허브 시황 데이터 원본을 읽어오지 못했습니다.<br>
+              <small class="text-muted">상세 에러: ${err.message || err}</small>
+            </div>`;
+        });
+    });
+
+    function filterCategory(cat, btnElement) {
+      document.querySelectorAll(".cat-btn").forEach(el => el.classList.remove("active"));
+      if (btnElement) btnElement.classList.add("active");
+      
+      let firstVisibleBtn = null;
+      document.querySelectorAll("#commodityTabs .nav-item").forEach(el => {
+        if (cat === 'all' || el.getAttribute("data-cat") === cat) {
+          el.style.display = "block";
+          if (!firstVisibleBtn) {
+            firstVisibleBtn = el.querySelector("button");
+          }
+        } else {
+          el.style.display = "none";
+        }
+      });
+
+      // 카테고리 전환 시 해당 카테고리의 첫번째 원자재로 자동 스위칭
+      if (firstVisibleBtn) {
+        firstVisibleBtn.click();
+      }
+    }
+
+    function switchCommodity(key, btnElement) {
+      selectedKey = key;
+      document.querySelectorAll("#commodityTabs .nav-link").forEach(el => el.classList.remove("active"));
+      if (btnElement) {
+        btnElement.classList.add("active");
+      }
+      renderDashboard(key);
+    }
+
+    function renderDashboard(key) {
+      if (!globalData || !globalData.forecast_data) return;
+      const forecastInfo = globalData.forecast_data[key];
+      if (!forecastInfo) {
+        console.warn("해당 원자재 데이터가 없습니다: " + key);
+        return;
+      }
+
+      const historyList = (globalData.history_3y && globalData.history_3y[key]) ? globalData.history_3y[key] : [];
+      const forecastList = forecastInfo.monthly_forecast || [];
+
+      // 통화 단위 포맷 분기화 (한화/센트/달러 기호 매칭)
+      const isKrw = forecastInfo.unit.includes("KRW");
+      const isCent = forecastInfo.unit.includes("US￠") || forecastInfo.unit.includes("￠");
+      const currencySign = isKrw ? "₩" : (isCent ? "¢" : "$");
+
+      // 1. KPI 지표 갱신
+      document.getElementById("kpi-current").innerText = currencySign + Number(forecastInfo.current_price).toLocaleString();
+      document.getElementById("kpi-unit").innerText = forecastInfo.unit;
+      document.getElementById("kpi-target").innerText = currencySign + Number(forecastInfo.forecast_6m_target).toLocaleString();
+      document.getElementById("kpi-rate").innerText = forecastInfo.forecast_change_rate;
+      document.getElementById("kpi-direction").innerText = forecastInfo.direction;
+      document.getElementById("kpi-volatility").innerText = forecastInfo.volatility_score;
+      document.getElementById("rationale-text").innerText = forecastInfo.rationale;
+
+      // 2. 과거 3년(Daily) + 미래 6개월(Monthly) 시계열 결합
+      const allLabels = [];
+      const histPrices = [];
+      const forePrices = [];
+
+      // 과거 데이터 채우기 (Daily)
+      historyList.forEach(item => {
+        allLabels.push(item.date);
+        histPrices.push(item.price);
+        forePrices.push(null);
+      });
+
+      // 연결점 처리 (과거 마지막 값에서 점선 시작)
+      if (histPrices.length > 0) {
+        forePrices[histPrices.length - 1] = histPrices[histPrices.length - 1];
+      }
+
+      // 미래 6개월 데이터 채우기 (Monthly)
+      forecastList.forEach(item => {
+        allLabels.push(item.month + " (E)");
+        histPrices.push(null);
+        forePrices.push(item.price);
+      });
+
+      // 3. Chart.js 렌더링
+      if (currentChart) currentChart.destroy();
+      const ctx = document.getElementById('mainChart').getContext('2d');
+      
+      currentChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: allLabels,
+          datasets: [
+            {
+              label: '과거 3년 실적 (' + forecastInfo.unit + ') [Daily]',
+              data: histPrices,
+              borderColor: '#1428A0',
+              backgroundColor: 'rgba(20, 40, 160, 0.05)',
+              borderWidth: 2,
+              pointRadius: 0,               // 평소에는 일일 점을 숨김 (라인 품질 극대화)
+              pointHitRadius: 10,           // 마우스 반응 반경 확대
+              pointHoverRadius: 4,          // 호버 시 점 확대
+              pointHoverBackgroundColor: '#1428A0',
+              fill: true,
+              tension: 0.1
+            },
+            {
+              label: '향후 6개월 AI 예측 (' + forecastInfo.unit + ') [Monthly]',
+              data: forePrices,
+              borderColor: '#DC3545',
+              backgroundColor: 'rgba(220, 53, 69, 0.1)',
+              borderWidth: 2.5,
+              borderDash: [5, 5],
+              pointRadius: 4,
+              pointBackgroundColor: '#DC3545',
+              pointHoverRadius: 6,
+              fill: false,
+              tension: 0.2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'top' },
+            tooltip: {
+              callbacks: {
+                label: function(context) {
+                  return context.dataset.label.split(' [')[0] + ': ' + currencySign + Number(context.raw).toLocaleString();
+                }
+              }
+            }
+          },
+          scales: {
+            y: {
+              title: { display: true, text: forecastInfo.unit },
+              grid: { color: '#f0f0f0' },
+              ticks: {
+                callback: function(value) {
+                  return currencySign + Number(value).toLocaleString();
+                }
+              }
+            },
+            x: {
+              grid: { display: false },
+              ticks: {
+                maxTicksLimit: 15,       // 고정민 750개 데이터 중 15개 이내만 균등 눈금 표시 (겹침 원천 제거!)
+                maxRotation: 0,          // 언제나 수평하게 표시하여 미적 단정함 유지
+                font: { size: 11, weight: '500' }
+              }
+            }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
