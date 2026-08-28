@@ -1,21 +1,19 @@
 import json
 import os
 from datetime import datetime
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 import yfinance as yf
 
-# 1. API 키 확인
+# 1. API 키 확인 및 최신 클라이언트 생성
 api_key = os.environ.get("GEMINI_API_KEY")
 if not api_key:
-  print("[에러] GEMINI_API_KEY 환경변수를 찾을 수 없습니다.")
+  print("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
   exit(1)
 
-genai.configure(api_key=api_key)
+client = genai.Client(api_key=api_key)
 
-# 최신 Gemini 모델 설정 (1.5 Flash)
-model = genai.GenerativeModel("gemini-1.5-flash")
-
-# 2. 시장 데이터 수집 (예외 처리 추가)
+# 2. 시장 데이터 수집 (구리, 금, 환율)
 try:
   copper = yf.Ticker("HG=F").history(period="3mo")["Close"].dropna()
   gold = yf.Ticker("GC=F").history(period="3mo")["Close"].dropna()
@@ -28,7 +26,7 @@ try:
       round(float(x), 2) for x in copper.iloc[-10:].tolist()
   ] if len(copper) > 0 else [4.1, 4.2, 4.25]
 except Exception as e:
-  print(f"[경고] yfinance 데이터 수집 실패, 기본값 사용: {e}")
+  print(f"[경고] 지표 수집 예외 발생, 기본값 사용: {e}")
   copper_curr = 4.25
   gold_curr = 2400.0
   cny_curr = 7.23
@@ -42,14 +40,14 @@ market_context = {
     "cny_current_usd": cny_curr,
 }
 
-# 3. Gemini 예측 프롬프트 구성 (JSON 형식 강제)
+# 3. 프롬프트 생성
 prompt = f"""
 당신은 원자재 가격 분석 전문 AI입니다. 아래 공개 시황 데이터를 바탕으로 향후 6개월간 전기동(구리) 가격 및 수급 전망을 분석하세요.
 
 [시장 데이터]
 {json.dumps(market_context, ensure_ascii=False)}
 
-반드시 마크다운 없이 순수 JSON 포맷으로만 응답하세요:
+반드시 아래 JSON 스키마 형식으로만 출력하세요:
 {{
   "update_date": "{market_context['latest_date']}",
   "current_price": {market_context['copper_current_usd_lb']},
@@ -69,18 +67,24 @@ prompt = f"""
 }}
 """
 
+# 4. 최신 Gemini 2.5 Flash 호출 (JSON Mode)
 try:
-  response = model.generate_content(
-      prompt, generation_config={"response_mime_type": "application/json"}
+  response = client.models.generate_content(
+      model="gemini-2.5-flash",
+      contents=prompt,
+      config=types.GenerateContentConfig(
+          response_mime_type="application/json",
+      ),
   )
 
-  # 4. 결과 JSON 파일로 저장
+  # 5. 결과 JSON 파일 저장
   with open("copper_forecast.json", "w", encoding="utf-8") as f:
     f.write(response.text)
 
   print(
       f"[성공] copper_forecast.json 생성 완료: {market_context['latest_date']}"
   )
+
 except Exception as e:
-  print(f"[Gemini API 에러] {e}")
+  print(f"[Gemini API 호출 실패] {e}")
   exit(1)
