@@ -1,0 +1,17 @@
+{
+  "update_date": "2026-08-28",
+  "current_price": 6.69,
+  "forecast_6m_target": 7.63,
+  "forecast_change_rate": "+14.1%",
+  "direction": "상승",
+  "volatility_score": 68,
+  "planning_advisor": "향후 6개월간 공급 타이트 및 친환경 수요 증가로 가격 상승세가 지속될 전망입니다. 구매 비용 절감을 위해 주요 물량에 대한 선제적 조기 확보 전략을 권고합니다.",
+  "monthly_forecast": [
+    {"month": "M+1", "price": 6.78},
+    {"month": "M+2", "price": 6.90},
+    {"month": "M+3", "price": 7.05},
+    {"month": "M+4", "price": 7.22},
+    {"month": "M+5", "price": 7.40},
+    {"month": "M+6", "price": 7.63}
+  ]
+}
