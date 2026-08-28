@@ -124,9 +124,9 @@ prompt = f"""
 
 print("[진행] Gemini 다변량 퀀트 오버레이 패턴 매칭 분석 가동...")
 
-# 올바르고 공식적인 최신 구글 권장 모델명 맵
+# 구글이 제공한 최신 신규 유저용 강제 마일스톤 모델명으로 정적 대체
 MAX_RETRIES = 5
-MODELS_TO_TRY = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro"]
+MODELS_TO_TRY = ["gemini-3.6-flash", "gemini-3.1-pro-preview"]
 response = None
 last_exception = None
 success = False
