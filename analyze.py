@@ -69,7 +69,16 @@ def generate_6_commodities_10y():
     res["platinum"].append({"date": date_str, "price": round(plat, 2)})
   return res
 
-res_daily = generate_6_commodities_10y()
+try:
+  res_daily = generate_6_commodities_10y()
+except Exception as e:
+  print(f"[경고] 10개년 병합 중 인덱스 편차 감지, 기본 월별 백업 매핑 가동: {e}")
+  res_daily = {k: [] for k in ["wti", "copper", "aluminum", "gold", "silver", "platinum"]}
+  for k in res_daily.keys():
+    df = hist_data.get(k, pd.Series())
+    for idx, val in df.items():
+      res_daily[k].append({"date": idx.strftime("%Y-%m-%d"), "price": round(float(val), 2)})
+
 summary_history = {}
 for k, v in res_daily.items():
   step = max(1, len(v) // 60)
@@ -88,40 +97,31 @@ market_summary_for_ai = {
 
 prompt = f"""
 당신은 글로벌 원자재 및 거시경제 퀀트 분석 수석 애널리스트입니다.
-시장 입력 데이터를 참고하여, 6대 핵심 원자재(wti, copper, aluminum, gold, silver, platinum) 각각의 예측가와 시나리오, 요인지표(metrics), 과거 유사국면(analogs) 분석 데이터셋을 마크다운 없이 순수 JSON 포맷으로 작성하세요.
+시장 입력 데이터를 참고하여, 6대 핵심 원자재 각각의 예측가와 시나리오, 요인지표(metrics), 과거 유사국면(analogs) 분석 데이터셋을 마크다운 없이 순수 JSON 포맷으로 작성하세요.
 
-[요인지표(metrics) 수급 요약 가이드]
-- Rationale(수급 요약)에는 공급 요인의 칠레 구리 광산 생산량 감소 폭 확대와 수요 요인의 위안화 환율 하락이 가격 상방을 지지하고 있습니다 처럼 개별 지표의 연계를 Rationale 문장으로 직접 쓰세요.
-
-[과거 유사국면(analogs) 가이드]
-- title: "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면", "중국 부양책 랠리 및 LME 공급 병목 국면" 처럼 역사적 사건을 직접 대제목으로 기입.
-- period: 연도 약식 포맷 (예: "'20.11~'21.10")
-- miniHist(과거 12개 월 가격), miniForecast(과거 유사 시점 이후 실제 6개 월 가격 결과)
-
-[6개월 가격 예측 근거 가이드]
+[요인지표(metrics) 및 과거 유사국면(analogs) 미니 3선 그래프 가이드]
+- Rationale(수급 요약)에는 공급 요인의 남아공 대정전 폭 확대와 수요 요인의 위안화 환율 상승이 가격을 지지하고 있습니다 처럼 영향도를 기재해 주세요.
+- 과거 유사국면(analogs): title(역사적 사건 정성 대제목 예: "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면"), period(연도 약식 포맷 예: "'20.11~'21.10"), miniHist(과거 12개 월 가격), miniForecast(과거 유사 시점 이후 실제 6개 월 가격)
 - monthly_forecast_base 내의 "rationale" 속성에는 각 월에 매칭되는 실제 AI 가격 산정 고유의 근거 텍스트 데이터를 작성하세요.
 
 [시장 입력 데이터]
 {json.dumps(market_summary_for_ai, ensure_ascii=False)}
 
-스키마:
+마크다운 없이 순수 JSON 포맷으로만 응답하세요. 스키마:
 {{
   "update_date": "{market_summary_for_ai['update_date']}",
   "commodities": {{
     "wti": {{ 
       "name": "WTI 원유 (CME)", "unit": "USD/bbl", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, 
       "planning_advisor": "Planning Advisor : [전략 문구]",
-      "monthly_forecast_base": [ 
-        {{"month": "2026-09", "price": 0.0, "rationale": "9월 실질 수급 및 매크로 지표 변동에 따른 AI 정밀 산정 근거 데이터"}} 
-      ],
+      "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "9월 실질 수급 및 매크로 지표 변동에 따른 AI 정밀 산정 근거 데이터"}} ],
       "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ],
       "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ],
       "rationale_base": "기본 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
       "metrics": [ {{"label": "위안화 환율", "val": "6.72223 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"}} ],
       "analogs": [
         {{ "period": "'20.11~'21.10", "similarity": "92%", "acc": "92%", "forecast": "+14.9%", "actual": "+3.8%", "title": "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면", "summary": "공급 측면의 구리 TC 하락이...",
-          "miniHist": [51, 52, 55, 58, 61, 63, 65, 68, 72, 75, 80, 85],
-          "miniForecast": [88, 90, 92, 94, 96, 98]
+          "miniHist": [51, 52, 55, 58, 61, 63, 65, 68, 72, 75, 80, 85], "miniForecast": [88, 90, 92, 94, 96, 98]
         }}
       ]
     }},
@@ -135,32 +135,36 @@ prompt = f"""
 """
 
 print("[진행] Gemini 다변량 퀀트 오버레이 패턴 매칭 분석 가동...")
-MODELS_TO_TRY = ["gemini-3.6-flash", "gemini-3.1-pro-preview"]
+MODELS_TO_TRY = ["gemini-1.5-flash", "gemini-3.6-flash"]
 response = None
 last_exception = None
 success = False
 
 for model_name in MODELS_TO_TRY:
-  try:
-    print(f"[진행] {model_name} 연산 시도 중...")
-    if use_new_sdk:
-      response = client.models.generate_content(
-          model=model_name,
-          contents=prompt,
-          config=types.GenerateContentConfig(response_mime_type="application/json")
-      )
-    else:
-      model = google_genai.GenerativeModel(model_name)
-      response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-    success = True
+  for attempt in range(1, 5):
+    try:
+      print(f"[진행] {model_name} 연산 시도 중 (시도 {attempt}회째)...")
+      if use_new_sdk:
+        response = client.models.generate_content(
+            model=model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+      else:
+        model = google_genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
+      success = True
+      break
+    except Exception as e:
+      last_exception = e
+      wait_sec = 2**attempt + 5
+      print(f"[경고] {model_name} 실패: {e}. {wait_sec}초 후 다시 지수 재시도...")
+      time.sleep(wait_sec)
+  if success:
     break
-  except Exception as e:
-    last_exception = e
-    print(f"[경고] {model_name} 실패: {e}. 다음 모델 폴백...")
-    time.sleep(2)
 
 if not success:
-  print(f"[최종 에러] Gemini 연산 실패: {last_exception}")
+  print(f"[최종 에러] Gemini 연산 전체 실패: {last_exception}")
   exit(1)
 
 try:
