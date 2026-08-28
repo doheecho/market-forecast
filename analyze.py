@@ -14,7 +14,7 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-# 2. 다변량 시장 데이터 수집 (최근 3년 데이터)
+# 2. 다변량 시장 데이터 수집 (최근 3년 데이터, 일단위 interval="1d")
 TICKERS = {
     "copper": "HG=F",  # 구리 (USD/lb)
     "gold": "GC=F",  # 금 (USD/oz)
@@ -27,11 +27,12 @@ TICKERS = {
     "usdkrw": "KRW=X",  # 원/달러 환율
 }
 
-print("[진행] 야후 파이낸스에서 3년 시계열 데이터 수집 중...")
+print("[진행] 야후 파이낸스에서 3년 일단위 시계열 데이터 수집 중...")
 hist_data = {}
 for name, ticker in TICKERS.items():
   try:
-    df = yf.Ticker(ticker).history(period="3y", interval="1mo")["Close"]
+    # interval="1d"로 일일 가격 수집 (영업일 기준 없는 날짜는 dropna로 있는 날만 수집)
+    df = yf.Ticker(ticker).history(period="3y", interval="1d")["Close"]
     df = df.dropna()
     hist_data[name] = df
   except Exception as e:
@@ -39,28 +40,55 @@ for name, ticker in TICKERS.items():
     hist_data[name] = pd.Series(dtype=float)
 
 
-# 시계열 데이터를 월별 [YYYY-MM, 가격] 리스트로 가공
-def format_history(series, unit_mult=1.0):
+# 시계열 데이터를 일별 [YYYY-MM-DD, 가격] 리스트로 가공 (대시보드 차트 표출용)
+def format_history_daily(series, unit_mult=1.0):
   if series.empty:
     return []
   res = []
   for idx, val in series.items():
+    date_str = idx.strftime("%Y-%m-%d")
+    res.append({"date": date_str, "price": round(float(val) * unit_mult, 2)})
+  return res
+
+
+# 시계열 데이터를 월별 [YYYY-MM, 가격] 리스트로 가공 (Gemini 프롬프트 분석 요약용)
+def format_history_monthly(series, unit_mult=1.0):
+  if series.empty:
+    return []
+  # ME 와 M 호환성 처리
+  try:
+    monthly_series = series.resample("ME").last().dropna()
+  except ValueError:
+    monthly_series = series.resample("M").last().dropna()
+  res = []
+  for idx, val in monthly_series.items():
     date_str = idx.strftime("%Y-%m")
     res.append({"date": date_str, "price": round(float(val) * unit_mult, 2)})
   return res
 
 
-# 텅스텐(Tungsten APT) 추정 시계열 (글로벌 벤치마크 기준 연동)
+# 텅스텐(Tungsten APT) 추정 시계열 생성 (일단위 및 월단위)
 copper_s = hist_data.get("copper", pd.Series())
-tungsten_history = []
+tungsten_history_daily = []
 if not copper_s.empty:
   for idx, val in copper_s.items():
-    date_str = idx.strftime("%Y-%m")
-    # APT kg당 단가 추정 모델링 (구리/에너지/환율 상관계수 가중)
+    date_str = idx.strftime("%Y-%m-%d")
     approx_price = round(320.0 + (float(val) * 12.5), 1)  # USD/mtu 기준
-    tungsten_history.append({"date": date_str, "price": approx_price})
+    tungsten_history_daily.append({"date": date_str, "price": approx_price})
 
-market_summary = {
+tungsten_history_monthly = []
+if not copper_s.empty:
+  try:
+    copper_monthly = copper_s.resample("ME").last().dropna()
+  except ValueError:
+    copper_monthly = copper_s.resample("M").last().dropna()
+  for idx, val in copper_monthly.items():
+    date_str = idx.strftime("%Y-%m")
+    approx_price = round(320.0 + (float(val) * 12.5), 1)
+    tungsten_history_monthly.append({"date": date_str, "price": approx_price})
+
+# Gemini 분석용 가벼운 월단위 데이터 요약 패킷 구성
+market_summary_for_ai = {
     "update_date": datetime.now().strftime("%Y-%m-%d"),
     "macro": {
         "dxy": (
@@ -85,12 +113,12 @@ market_summary = {
         ),
     },
     "history": {
-        "copper": format_history(hist_data.get("copper")),
-        "tungsten": tungsten_history,
-        "gold": format_history(hist_data.get("gold")),
-        "silver": format_history(hist_data.get("silver")),
-        "aluminum": format_history(hist_data.get("aluminum")),
-        "wti": format_history(hist_data.get("wti")),
+        "copper": format_history_monthly(hist_data.get("copper")),
+        "tungsten": tungsten_history_monthly,
+        "gold": format_history_monthly(hist_data.get("gold")),
+        "silver": format_history_monthly(hist_data.get("silver")),
+        "aluminum": format_history_monthly(hist_data.get("aluminum")),
+        "wti": format_history_monthly(hist_data.get("wti")),
     },
 }
 
@@ -107,11 +135,11 @@ prompt = f"""
 4. rationale(산정 근거)은 수급 요인, 매크로 요인, 리스크 요인을 포함하여 구매 담당자가 바로 보고서에 인용할 수 있도록 3~4문장으로 전문성 있게 작성하세요.
 
 [시장 입력 데이터]
-{json.dumps(market_summary, ensure_ascii=False)}
+{json.dumps(market_summary_for_ai, ensure_ascii=False)}
 
 반드시 마크다운 없이 순수 JSON 포맷으로만 응답하세요. 스키마:
 {{
-  "update_date": "{market_summary['update_date']}",
+  "update_date": "{market_summary_for_ai['update_date']}",
   "commodities": {{
     "copper": {{
       "name": "전기동 (Copper)",
@@ -140,12 +168,19 @@ prompt = f"""
       "direction": "상승/하락/보합",
       "volatility_score": 0,
       "rationale": "산정 근거 요약 (중국 공급망, 방산/반도체 수요 등)",
-      "monthly_forecast": [...]
+      "monthly_forecast": [
+        {{"month": "2026-09", "price": 0.0}},
+        {{"month": "2026-10", "price": 0.0}},
+        {{"month": "2026-11", "price": 0.0}},
+        {{"month": "2026-12", "price": 0.0}},
+        {{"month": "2027-01", "price": 0.0}},
+        {{"month": "2027-02", "price": 0.0}}
+      ]
     }},
-    "gold": {{ "name": "금 (Gold)", "unit": "USD/oz", ... }},
-    "silver": {{ "name": "은 (Silver)", "unit": "USD/oz", ... }},
-    "aluminum": {{ "name": "알루미늄 (Aluminum)", "unit": "USD/mt", ... }},
-    "wti": {{ "name": "WTI 원유", "unit": "USD/bbl", ... }}
+    "gold": {{ "name": "금 (Gold)", "unit": "USD/oz", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승", "volatility_score": 0, "rationale": "...", "monthly_forecast": [] }},
+    "silver": {{ "name": "은 (Silver)", "unit": "USD/oz", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승", "volatility_score": 0, "rationale": "...", "monthly_forecast": [] }},
+    "aluminum": {{ "name": "알루미늄 (Aluminum)", "unit": "USD/mt", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승", "volatility_score": 0, "rationale": "...", "monthly_forecast": [] }},
+    "wti": {{ "name": "WTI 원유", "unit": "USD/bbl", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승", "volatility_score": 0, "rationale": "...", "monthly_forecast": [] }}
   }}
 }}
 """
@@ -161,11 +196,22 @@ try:
   )
 
   result_json = json.loads(response.text)
-  # 과거 3년 데이터와 AI 예측 결과를 하나로 결합
+
+  # 과거 일단위 고정밀 시계열 데이터셋 구성
+  history_daily_out = {
+      "copper": format_history_daily(hist_data.get("copper")),
+      "tungsten": tungsten_history_daily,
+      "gold": format_history_daily(hist_data.get("gold")),
+      "silver": format_history_daily(hist_data.get("silver")),
+      "aluminum": format_history_daily(hist_data.get("aluminum")),
+      "wti": format_history_daily(hist_data.get("wti")),
+  }
+
+  # 과거 일단위 고정밀 데이터와 AI 예측 결과를 결합
   final_output = {
-      "update_date": market_summary["update_date"],
-      "macro": market_summary["macro"],
-      "history_3y": market_summary["history"],
+      "update_date": market_summary_for_ai["update_date"],
+      "macro": market_summary_for_ai["macro"],
+      "history_3y": history_daily_out,
       "forecast_data": result_json["commodities"],
   }
 
@@ -174,7 +220,7 @@ try:
 
   print(
       f"[성공] raw_materials_forecast.json 생성 완료:"
-      f" {market_summary['update_date']}"
+      f" {market_summary_for_ai['update_date']} (일단위 고밀도 데이터셋 반영)"
   )
 
 except Exception as e:
