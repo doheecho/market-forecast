@@ -1,43 +1,39 @@
-name: Market Forecast Bot
+name: Market Forecasting Automation
 
 on:
   schedule:
-    - cron: '0 22 * * *' # 매일 한국 시간 오전 7시 자동 실행
-  workflow_dispatch:     # 수동 실행 지원
-
-permissions:
-  contents: write
+    - cron: '0 22 * * *' # 매일 UTC 22:00 (한국 시간 오전 07:00) 크론 자동 기동
+  workflow_dispatch:      # 수동 트리거 지원
 
 jobs:
-  run-python:
+  run-forecasting-quant:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - name: Checkout Repository
+      uses: actions/checkout@v4 # 최신 Node v20 호환 액션
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
+    - name: Set up Python Environment
+      uses: actions/setup-python@v5 # 최신 Node v20 호환 세팅
+      with:
+        python-version: '3.11'
+        cache: 'pip'
 
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
+    - name: Install Quant Libraries
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas yfinance google-genai
 
-      - name: Run analysis script
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: |
-          python analyze.py
+    - name: Execute AI Market Forecasting (analyze.py)
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      run: |
+        python analyze.py
 
-      - name: Commit and Push results
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add raw_materials_forecast.json
-          git diff --quiet && git diff --staged --quiet || (
-            git commit -m "Update Multi-Commodity Forecast [skip ci]"
-            git pull --rebase origin main
-            git push
-          )
+    - name: Secure Auto Commit & Rebase Push
+      run: |
+        git config --global user.name 'doheecho'
+        git config --global user.email 'dohee.cho@ai.samsunghealthcare.com'
+        git add raw_materials_forecast.json
+        # 변경 사항이 있을 때만 안전 커밋 & rebase re-push
+        git diff --quiet && git diff --staged --quiet || (git commit -m "📊 Auto-Update: AI Market Forecasting [$(date +'%Y-%m-%d %H:%M:%S')]" && git pull --rebase origin main && git push origin main)
