@@ -1,462 +1,302 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <base target="_top">
-  <meta charset="utf-8">
-  <title>핵심 6대 원자재 AI 가격 전망</title>
+  <base target="_top"><meta charset="utf-8">
+  <title>6대 원자재 AI 가격 전망</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root { --samsung-blue: #1428A0; --bg-color: #f4f7f9; }
-    body { background-color: var(--bg-color); font-family: 'Noto Sans KR', sans-serif; padding: 20px; }
-    .header-bar { background: var(--samsung-blue); color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
-    .nav-pills .nav-link { color: #555; font-weight: 500; border-radius: 8px; margin-right: 5px; cursor: pointer; border: 1px solid #e0e0e0; background: white; padding: 10px 18px; }
-    .nav-pills .nav-link.active { background-color: var(--samsung-blue) !important; color: white !important; border-color: var(--samsung-blue) !important; }
-    .card-custom { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e0e0e0; padding: 25px; margin-bottom: 20px; }
-    .advisor-box { background-color: #f3f5ff; border-left: 5px solid var(--samsung-blue); border-radius: 6px; padding: 18px 22px; margin-bottom: 25px; box-shadow: inset 0 1px 3px rgba(20,40,160,0.05); }
-    .chart-container { position: relative; height: 380px; width: 100%; margin-bottom: 20px; }
-    .metric-card { border: 1px solid #e9ecef; border-radius: 8px; padding: 15px; background: #fafbfc; height: 100%; }
-    .similarity-box { border: 1px solid #dee2e6; border-radius: 10px; padding: 20px; background-color: white; margin-bottom: 20px; }
+    :root { --s: #1428A0; }
+    body { background:#f4f7f9; font-family:sans-serif; padding:20px; }
+    .header-bar { background: var(--s); color:white; padding:15px 25px; border-radius:10px; margin-bottom:20px; display:flex; justify-content:space-between; align-items:center; }
+    .nav-pills .nav-link { color:#555; background:white; border:1px solid #e0e0e0; margin-right:5px; margin-bottom:8px; }
+    .nav-pills .nav-link.active { background:var(--s) !important; color:white !important; }
+    .card-custom { background:white; border-radius:12px; border:1px solid #e0e0e0; padding:25px; margin-bottom:20px; }
+    .advisor-box { background:#f3f5ff; border-left:5px solid var(--s); padding:15px 20px; margin-bottom:20px; font-weight:700; color:var(--s); }
+    .range-btn { font-size:0.85rem; padding:5px 14px; border-radius:6px; border:1px solid #dee2e6; background:white; }
+    .range-btn.active { background:#555 !important; color:white !important; }
+    .scroll-x-container { display:flex; overflow-x:auto; gap:15px; padding-bottom:8px; }
+    .metric-card { flex-shrink:0; width:250px; border:1px solid #e9ecef; border-radius:8px; padding:12px; background:#fafbfc; }
+    .similarity-box { border:1px solid #dee2e6; border-radius:10px; padding:20px; background:white; margin-bottom:15px; }
+    .scenario-card { border:1px solid #dee2e6; border-radius:8px; padding:18px; height:100%; background:white; }
   </style>
 </head>
 <body>
   <div class="container-fluid">
     <div class="header-bar">
-      <div>
-        <h4 class="m-0 fw-bold">📊 글로벌 6대 핵심 원자재 AI 가격 전망 및 전략 분석 보고</h4>
-        <small class="opacity-75">3개년 월별 트렌드 일치 차트 + 연관 요인지표 수급 배지 + 과거 국면 유사도 교차 검증</small>
-      </div>
-      <div id="update-badge" class="badge bg-light text-dark fs-6">기준일: -</div>
+      <div><h4 class="m-0 fw-bold">📊 글로벌 6대 핵심 원자재 AI 가격 전망 및 전략 분석 보고</h4></div>
+      <div id="update-badge" class="badge bg-light text-dark fs-6">-</div>
     </div>
-
-    <!-- 6대 원자재 탭 네비게이션 -->
-    <ul class="nav nav-pills mb-4" id="commodityTabs">
-      <li class="nav-item"><button class="nav-link active" onclick="switchCommodity('wti', this)">WTI 원유 (CME)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('copper', this)">전기동 (LME)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('aluminum', this)">알루미늄 (LME)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('gold', this)">금 (LBMA)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('silver', this)">은 (LBMA)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('platinum', this)">백금 (CME)</button></li>
+    <ul class="nav nav-pills mb-3" id="commodityTabs">
+      <li class="nav-item"><button class="nav-link active" onclick="switchCommodity('wti', this)">WTI 원유</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('copper', this)">전기동</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('aluminum', this)">알루미늄</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('gold', this)">금</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('silver', this)">은</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('platinum', this)">백금</button></li>
     </ul>
-
-    <!-- 메인 대시보드 카드 -->
     <div class="card-custom">
-      <div id="loading" class="text-center py-5">
-        <div class="spinner-border text-primary" role="status"></div>
-        <p class="mt-3 text-muted">야후 파이낸스 월별 실거래 종가 및 AI 전략 분석 데이터를 수집 중입니다...</p>
-      </div>
-
-      <div id="dashboard-content" style="display: none;">
-        <!-- 상단 Planning Advisor 요약 영역 -->
-        <div class="advisor-box">
-          <h5 class="fw-bold text-dark d-flex align-items-center mb-2">
-            <span class="me-2"><i class="bi bi-shield-shaded text-primary"></i></span> Planning Advisor 의결 추천 권고
-          </h5>
-          <p id="advisor-text" class="mb-0 text-dark fw-bold" style="font-size: 1.05rem; line-height: 1.6;"></p>
-        </div>
-
-        <!-- 3대 핵심 KPI 요약 (가로 3칸) -->
+      <div id="loading" class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+      <div id="dashboard-content" style="display:none;">
+        <div class="advisor-box shadow-sm" id="advisor-block">Planning Advisor : Loading...</div>
         <div class="row text-center mb-4 g-3">
-          <div class="col-md-4">
-            <div class="p-3 border rounded bg-light">
-              <div class="text-muted small">현재가 (Close)</div>
-              <h3 class="fw-bold my-1 text-dark" id="kpi-current">-</h3>
-              <small class="text-muted" id="kpi-unit">-</small>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="p-3 border rounded bg-light">
-              <div class="text-muted small">6개월 후 AI 목표가</div>
-              <h3 class="fw-bold my-1 text-danger" id="kpi-target">-</h3>
-              <span id="kpi-rate" class="stat-badge bg-danger text-white">+0.0%</span>
-            </div>
-          </div>
-          <div class="col-md-4">
-            <div class="p-3 border rounded bg-light">
-              <div class="text-muted small">방향성 / 가격 변동성 지수</div>
-              <h3 class="fw-bold my-1 text-primary d-flex justify-content-center align-items-center gap-2">
-                <span id="kpi-direction">-</span>
-                <span class="fs-5 text-warning fw-normal" id="kpi-volatility">(- pt)</span>
-              </h3>
-              <small class="text-muted">추세 예측 인덱스</small>
-            </div>
+          <div class="col-md-4"><div class="p-3 border rounded bg-light"><small class="text-muted">현재가</small><h4 class="fw-bold my-1 text-dark" id="kpi-current">-</h4><small id="kpi-unit">-</small></div></div>
+          <div class="col-md-4"><div class="p-3 border rounded bg-light"><small class="text-muted">6개월 후 AI 목표가</small><h4 class="fw-bold my-1 text-danger" id="kpi-target">-</h4><span id="kpi-rate" class="badge bg-danger">+0%</span></div></div>
+          <div class="col-md-4"><div class="p-3 border rounded bg-light"><small class="text-muted">변동성 지수</small><h4 class="fw-bold my-1 text-warning" id="kpi-volatility">-</h4><small class="text-muted">pt</small></div></div>
+        </div>
+        <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <span class="text-secondary fw-bold small">조회 범위 설정 (과거 실적 기간):</span>
+          <div class="btn-group" id="rangeButtonGroup">
+            <button class="range-btn" onclick="setHistoryRange(36, this)">3년</button>
+            <button class="range-btn" onclick="setHistoryRange(24, this)">2년</button>
+            <button class="range-btn active" onclick="setHistoryRange(12, this)">1년</button>
+            <button class="range-btn" onclick="setHistoryRange(6, this)">6개월</button>
+            <button class="range-btn" onclick="setHistoryRange(3, this)">3개월</button>
+            <button class="range-btn" onclick="setHistoryRange(1, this)">1개월</button>
           </div>
         </div>
-
-        <!-- 과거 3년 + 미래 6개월 완벽 월말 가로폭 대칭 차트 -->
-        <div class="chart-container">
-          <canvas id="mainChart"></canvas>
+        <div style="position:relative; height:320px; width:100%; margin-bottom:20px;"><canvas id="mainChart"></canvas></div>
+        <div class="mb-4">
+          <h6 class="fw-bold text-dark mb-2"><i class="bi bi-grid text-primary"></i> 요인지표</h6>
+          <div class="scroll-x-container" id="metrics-container"></div>
         </div>
-
-        <!-- 중단 연관 요인지표 카드 섹션 (배지 조합) -->
-        <div class="mb-5">
-          <h5 class="fw-bold text-dark mb-3"><span class="me-2"><i class="bi bi-bar-chart-steps text-primary"></i></span> 해당 품목 핵심 수급 및 연관 요인지표 (Market Drivers)</h5>
-          <div class="row g-3" id="metrics-container">
-            <!-- JS 동적 매핑 -->
-          </div>
+        <div class="row g-3 mb-4" id="scenarios-container"></div>
+        <div class="mb-4" id="similarity-section" style="display:none;">
+          <h6 class="fw-bold text-dark mb-2"><i class="bi bi-clock-history text-primary"></i> 과거 유사 국면 분석</h6>
+          <div class="row" id="similarity-container"></div>
         </div>
-
-        <!-- 중하단 과거 유사 국면 비교 및 검증 섹션 -->
-        <div class="mb-5" id="similarity-section" style="display: none;">
-          <h5 class="fw-bold text-dark mb-3"><span class="me-2"><i class="bi bi-arrow-repeat text-primary"></i></span> 과거 역사적 유사 국면 정밀 분석 (Historical Analogs)</h5>
-          <div class="row" id="similarity-container">
-            <!-- JS 동적 매핑 -->
-          </div>
+        <div class="p-3 border rounded bg-white shadow-sm mb-3" style="border-left:4px solid var(--s);">
+          <h6 class="fw-bold text-dark mb-2 border-bottom pb-2">6개월 가격 예측 근거</h6>
+          <div id="forecast-rationales-container"></div>
         </div>
-
-        <!-- 최하단 향후 6개월간의 가격 예측 고유 근거 순차 나열 -->
-        <div>
-          <h5 class="fw-bold text-dark mb-3"><span class="me-2"><i class="bi bi-calendar-check text-primary"></i></span> 향후 6개월간의 월별 상세 가격 전망 및 순차 근거 (Monthly Outlook)</h5>
-          <div class="row g-3" id="forecast-rationales-container">
-            <!-- JS 동적 매핑 -->
-          </div>
-        </div>
-
       </div>
     </div>
   </div>
-
   <script>
-    let globalData = null;
-    let currentChart = null;
-    let selectedKey = 'wti';
+    let globalData=null, currentChart=null, selectedKey='wti', historyMonths=12;
 
-    // 수급 요인지표 정적 마스터 데이터
-    const METRIC_DATA = {
-      copper: [
-        { label: "위안화 환율", val: "6.72223 (USD/CNY)", date: "2026.08.27", cat: "수요", status: "보통", badge: "secondary" },
-        { label: "금 가격", val: "4,568.95 (USD/oz.t)", date: "2026.08.27", cat: "투자", status: "강세", badge: "danger" },
-        { label: "황 현물 가격", val: "9,035.67 (RMB/mt)", date: "2026.08.27", cat: "공급", status: "약세", badge: "primary" },
-        { label: "구리 TC", val: "-227.5 (USD/mt)", date: "2026.08.27", cat: "공급", status: "강세", badge: "danger" },
-        { label: "SHFE 전기동 재고", val: "89,548 (TONNES)", date: "2026.08.27", cat: "재고", status: "보통", badge: "secondary" },
-        { label: "LME 전기동 재고", val: "235,575 (TONNES)", date: "2026.08.27", cat: "재고", status: "약세", badge: "primary" },
-        { label: "칠레 구리 광산 생산량", val: "5.24 (Percent)", date: "2026.06", cat: "공급", status: "강세", badge: "danger" },
-        { label: "페루 구리 광산 생산량", val: "-4.67 (Percent)", date: "2026.06", cat: "공급", status: "강세", badge: "danger" },
-        { label: "중국 소매판매", val: "1.0 (Percent)", date: "2026.07", cat: "수요", status: "보통", badge: "secondary" },
-        { label: "투기적 순매수 건수", val: "79,748 (CONTRACTS)", date: "2026.08.18", cat: "투자", status: "보통", badge: "secondary" }
-      ],
-      wti: [
-        { label: "미국 상업 원유 재고", val: "425.4M (bbl)", date: "2026.08.27", cat: "재고", status: "강세", badge: "danger" },
-        { label: "미국 리그 가동 수 (Rig Count)", val: "483 (Units)", date: "2026.08.27", cat: "공급", status: "약세", badge: "primary" },
-        { label: "OPEC+ 총 생산량 YOY", val: "-1.2 (Percent)", date: "2026.07", cat: "공급", status: "보합", badge: "secondary" },
-        { label: "미국 정제마진 스프레드", val: "14.25 (USD/bbl)", date: "2026.08.27", cat: "수요", status: "강세", badge: "danger" }
-      ],
-      aluminum: [
-        { label: "LME 알루미늄 재고량", val: "895,450 (TONNES)", date: "2026.08.27", cat: "재고", status: "약세", badge: "primary" },
-        { label: "중국 알루미나 현물 가격", val: "3,950 (RMB/ton)", date: "2026.08.27", cat: "공급", status: "강세", badge: "danger" },
-        { label: "유럽 산업용 전력 단가", val: "142.5 (EUR/MWh)", date: "2026.08.27", cat: "공급", status: "보합", badge: "secondary" }
-      ],
-      gold: [
-        { label: "미국 10년물 실질 국채금리", val: "1.85 (Percent)", date: "2026.08.27", cat: "투자", status: "강세", badge: "danger" },
-        { label: "SPDR 골드 트러스트 재고량", val: "855.4 (TONNES)", date: "2026.08.27", cat: "재고", status: "보통", badge: "secondary" },
-        { label: "COMEX 금 투기 순매수", val: "185,450 (CONTRACTS)", date: "2026.08.18", cat: "투자", status: "강세", badge: "danger" }
-      ],
-      silver: [
-        { label: "글로벌 은 현물 재고", val: "28,450 (TONNES)", date: "2026.08.27", cat: "재고", status: "보통", badge: "secondary" },
-        { label: "글로벌 태양광용 은 전도체 수요", val: "4,250 (TONNES)", date: "2026.06", cat: "수요", status: "강세", badge: "danger" },
-        { label: "금/은 가격 비율 (Gold/Silver Ratio)", val: "83.4 (Ratio)", date: "2026.08.27", cat: "투자", status: "보통", badge: "secondary" }
-      ],
-      platinum: [
-        { label: "자동차 촉매제 소비용 수요 YOY", val: "2.4 (Percent)", date: "2026.06", cat: "수요", status: "보통", badge: "secondary" },
-        { label: "남아공 광산 정전 가동중단 빈도", val: "보통 (Level)", date: "2026.08.27", cat: "공급", status: "강세", badge: "danger" },
-        { label: "LBMA 백금 보관소 수량", val: "124,500 (Ounces)", date: "2026.08.27", cat: "재고", status: "약세", badge: "primary" }
-      ]
-    };
-
-    // 과거 유사 국면 정밀 분석 마스터 데이터
-    const SIMILARITY_DATA = {
-      copper: [
-        {
-          period: "2020.04 - 2021.03",
-          similarity: "92%",
-          acc: "92%",
-          forecast: "+14.9%",
-          actual: "+3.8%",
-          summary: "비둘기파적 FOMC + LME 재고량 증가. 공급 측면의 구리 TC 하락이 현재와 유사하게 강한 상방 압력을 가했습니다. 여기에 중국 소매판매 증가라는 수요 요인 신호가 더해지며 가격 상승 동력을 함께 강화하는 구조였습니다."
-        },
-        {
-          period: "2016.09 - 2017.08",
-          similarity: "86%",
-          acc: "98%",
-          forecast: "+8.3%",
-          actual: "+8.2%",
-          summary: "중국 인프라 투자 기대 + 페루 광산 분쟁. 투자 측면의 금 가격 상승이 현재와 유사하게 강한 상방 압력을 가했습니다. 여기에 위안화 환율 하락이라는 수요 신호가 더해지며 가격 상승 동력을 함께 강화하는 구조였습니다."
-        }
-      ],
-      wti: [
-        {
-          period: "2019.01 - 2019.12",
-          similarity: "88%",
-          acc: "95%",
-          forecast: "+11.5%",
-          actual: "+10.2%",
-          summary: "OPEC 감산 타이트화 및 타 공급처 조율. 원유 유량 재고 지표의 상방 유도로 인해 배럴당 가격에 강력한 상승 모멘텀을 기여했던 유사 국면입니다."
-        }
-      ],
-      aluminum: [
-        {
-          period: "2021.05 - 2022.04",
-          similarity: "87%",
-          acc: "94%",
-          forecast: "+18.0%",
-          actual: "+13.1%",
-          summary: "중국/유럽 전력 제한 및 정련 가동 셧다운. 전력 단가의 급진적 상승이 금속 제련소 셧다운을 유도해 현재와 동일한 강한 수급 상방 압력을 야기했습니다."
-        }
-      ],
-      gold: [
-        {
-          period: "2019.06 - 2020.05",
-          similarity: "90%",
-          acc: "96%",
-          forecast: "+21.0%",
-          actual: "+20.8%",
-          summary: "연준 통화정책 완화 기조 및 실질 국채 금리 급락. 유동성 랠리와 안전 자산 회귀 현상이 결합하며 장기 골드 지지 채널을 형성한 유사 국면입니다."
-        }
-      ]
-    };
-
+    // GitHub 정적 호스팅 전용 Fetch 파이프라인
     document.addEventListener("DOMContentLoaded", function() {
-      google.script.run
-        .withSuccessHandler(function(res) {
-          if (!res || !res.success) {
-            document.getElementById("loading").innerHTML = `
-              <div class="alert alert-danger" role="alert">
-                <strong>데이터 로딩 실패:</strong> ${res ? res.message : '응답 데이터가 없습니다.'}
-              </div>`;
-            return;
-          }
-          
-          globalData = res.data;
+      const rawUrl = "https://raw.githubusercontent.com/doheecho/market-forecast/refs/heads/main/raw_materials_forecast.json";
+      const requestUrl = rawUrl + "?t=" + new Date().getTime(); // 캐시 버스팅
+      fetch(requestUrl)
+        .then(response => {
+          if(!response.ok) throw new Error("HTTP 상태 에러 " + response.status);
+          return response.json();
+        })
+        .then(data => {
+          globalData = data;
           document.getElementById("loading").style.display = "none";
           document.getElementById("dashboard-content").style.display = "block";
-          document.getElementById("update-badge").innerText = "기준일: " + (globalData.update_date || '-');
-          
+          document.getElementById("update-badge").innerText = "기준일: " + globalData.update_date;
           renderDashboard(selectedKey);
         })
-        .withFailureHandler(function(err) {
-          document.getElementById("loading").innerHTML = `
-            <div class="alert alert-danger" role="alert">
-              <strong>서버 통신 오류:</strong> ${err.message || err}
-            </div>`;
-        })
-        .getMultiCommodityData();
+        .catch(err => {
+          document.getElementById("loading").innerHTML = `<div class="alert alert-danger">데이터 로드 오류: ${err.message || err}</div>`;
+        });
     });
 
-    function switchCommodity(key, btnElement) {
-      selectedKey = key;
-      document.querySelectorAll("#commodityTabs .nav-link").forEach(el => el.classList.remove("active"));
-      if (btnElement) {
-        btnElement.classList.add("active");
-      }
-      renderDashboard(key);
+    function setHistoryRange(m, btn) {
+      historyMonths=m;
+      document.querySelectorAll("#rangeButtonGroup .range-btn").forEach(el=>el.classList.remove("active"));
+      if(btn) btn.classList.add("active");
+      renderDashboard(selectedKey);
+    }
+    function switchCommodity(k, btn) {
+      selectedKey=k;
+      document.querySelectorAll("#commodityTabs .nav-link").forEach(el=>el.classList.remove("active"));
+      if(btn) btn.classList.add("active");
+      renderDashboard(k);
     }
 
-    function renderDashboard(key) {
-      if (!globalData || !globalData.forecast_data) return;
-      const forecastInfo = globalData.forecast_data[key];
-      if (!forecastInfo) {
-        console.warn("해당 원자재 데이터가 없습니다: " + key);
-        return;
-      }
+    function renderDashboard(k) {
+      if(!globalData||!globalData.forecast_data) return;
+      const forecastInfo=globalData.forecast_data[k];
+      if(!forecastInfo) return;
 
-      const historyList = (globalData.history_3y && globalData.history_3y[key]) ? globalData.history_3y[key] : [];
-      const forecastList = forecastInfo.monthly_forecast || [];
+      const fullHistoryList = globalData.history_3y[k] || [];
+      const filterDays = historyMonths * 30; // 월을 대략적인 일수로 변환
+      const historyList = fullHistoryList.slice(-filterDays);
+      
+      const forecastBase = forecastInfo.monthly_forecast_base || [];
+      const forecastBull = forecastInfo.monthly_forecast_bull || [];
+      const forecastBear = forecastInfo.monthly_forecast_bear || [];
+      const forecastList = forecastInfo.monthly_forecast || forecastBase;
+      const currencySign = forecastInfo.unit.includes("￠") ? "¢" : "$";
 
-      // 통화 단위 포맷 분기화 (한화/센트/달러 기호 매칭)
-      const isCent = forecastInfo.unit.includes("US￠") || forecastInfo.unit.includes("￠");
-      const currencySign = isCent ? "¢" : "$";
-
-      // 1. Planning Advisor 권고 멘트 갱신
-      document.getElementById("advisor-text").innerText = forecastInfo.planning_advisor || "-";
-
-      // 2. 3대 KPI 요약 갱신 (가로 3칸 정형화)
+      document.getElementById("advisor-block").innerHTML = forecastInfo.planning_advisor || "-";
       document.getElementById("kpi-current").innerText = currencySign + Number(forecastInfo.current_price).toLocaleString();
-      document.getElementById("kpi-unit").innerText = forecastInfo.unit;
       document.getElementById("kpi-target").innerText = currencySign + Number(forecastInfo.forecast_6m_target).toLocaleString();
       document.getElementById("kpi-rate").innerText = forecastInfo.forecast_change_rate;
-      document.getElementById("kpi-direction").innerText = forecastInfo.direction;
-      document.getElementById("kpi-volatility").innerText = "(" + forecastInfo.volatility_score + " pt)";
+      document.getElementById("kpi-volatility").innerText = forecastInfo.volatility_score + " pt";
 
-      // 3. 과거 3년 + 미래 6개월 가로축 월말 균등 대칭 시계열 결합
-      const allLabels = [];
-      const histPrices = [];
-      const forePrices = [];
-
-      // 과거 데이터 채우기 (Monthly)
+      const allLabels=[], histPrices=[], foreBase=[], foreBull=[], foreBear[];
+      
+      // 일 단위 가격들을 차트에 주입하여 트렌드 노이즈 완벽 보존!
       historyList.forEach(item => {
         allLabels.push(item.date);
         histPrices.push(item.price);
-        forePrices.push(null);
+        foreBase.push(null); foreBull.push(null); foreBear.push(null);
       });
 
-      // 연결점 처리 (과거 마지막 값에서 점선 시작)
-      if (histPrices.length > 0) {
-        forePrices[histPrices.length - 1] = histPrices[histPrices.length - 1];
+      // 과거 마지막 일단위 가격과 미래 첫 월말 결합
+      if(histPrices.length > 0) {
+        const lastVal = histPrices[histPrices.length - 1];
+        foreBase[histPrices.length - 1] = lastVal;
+        foreBull[histPrices.length - 1] = lastVal;
+        foreBear[histPrices.length - 1] = lastVal;
       }
 
-      // 미래 6개월 데이터 채우기 (Monthly)
-      forecastList.forEach(item => {
+      // 미래 6개월 전망가 결합
+      forecastBase.forEach((item, idx) => {
         allLabels.push(item.month + " (E)");
         histPrices.push(null);
-        forePrices.push(item.price);
+        foreBase.push(item.price);
+        foreBull.push(forecastBull[idx] ? forecastBull[idx].price : null);
+        foreBear.push(forecastBear[idx] ? forecastBear[idx].price : null);
       });
 
-      // 4. Chart.js 렌더링 (과거와 미래가 완벽한 월 단위 1:1 폭으로 렌더링되게 가로축 완전 정형화)
       if (currentChart) currentChart.destroy();
       const ctx = document.getElementById('mainChart').getContext('2d');
-      
       currentChart = new Chart(ctx, {
         type: 'line',
         data: {
           labels: allLabels,
           datasets: [
-            {
-              label: '과거 3년 실적 (' + forecastInfo.unit + ')',
-              data: histPrices,
-              borderColor: '#1428A0',
-              backgroundColor: 'rgba(20, 40, 160, 0.05)',
-              borderWidth: 2.5,
-              pointRadius: 4,               // 점 크기 고정화
-              pointBackgroundColor: '#1428A0',
-              fill: true,
-              tension: 0.15
-            },
-            {
-              label: '향후 6개월 AI 예측 (' + forecastInfo.unit + ')',
-              data: forePrices,
-              borderColor: '#DC3545',
-              backgroundColor: 'rgba(220, 53, 69, 0.1)',
-              borderWidth: 2.5,
-              borderDash: [5, 5],            // 점선 처리
-              pointRadius: 4,
-              pointBackgroundColor: '#DC3545',
-              fill: false,
-              tension: 0.15
-            }
+            { label: '실적(일단위)', data: histPrices, borderColor: '#1428A0', backgroundColor: 'rgba(20,40,160,0.05)', borderWidth: 1.8, pointRadius: 0, fill: true, tension: 0.4 },
+            { label: 'Bull', data: foreBull, borderColor: '#FF9F43', borderWidth: 1.5, borderDash: [4,4], pointRadius: 0, fill: false, tension: 0.4 },
+            { label: 'Bear', data: foreBear, borderColor: '#54A0FF', backgroundColor: 'rgba(100,110,140,0.05)', borderWidth: 1.5, borderDash: [4,4], pointRadius: 0, fill: '-1', tension: 0.4 },
+            { label: 'Base', data: foreBase, borderColor: '#DC3545', borderWidth: 3, pointRadius: 0, fill: false, tension: 0.4 }
           ]
         },
         options: {
-          responsive: true,
-          maintainAspectRatio: false,
+          responsive: true, maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: { position: 'top' },
-            tooltip: {
-              callbacks: {
-                label: function(context) {
-                  return context.dataset.label.split(' (')[0] + ': ' + currencySign + Number(context.raw).toLocaleString();
-                }
-              }
-            }
-          },
           scales: {
-            y: {
-              title: { display: true, text: forecastInfo.unit },
-              grid: { color: '#f0f0f0' },
-              ticks: {
-                callback: function(value) {
-                  return currencySign + Number(value).toLocaleString();
-                }
-              }
-            },
-            x: {
-              grid: { display: false },
-              ticks: {
-                maxRotation: 0,
-                font: { size: 10, weight: '500' }
-              }
-            }
+            y: { ticks: { callback: function(v) { return currencySign + Number(v).toLocaleString(); } } },
+            x: { ticks: { maxRotation: 0, callback: function(v, i) {
+              const label = allLabels[i] || "";
+              if (label.includes("(E)") || label.endsWith("-01") || label.endsWith("-15")) return label;
+              return "";
+            } } }
           }
         }
       });
 
-      // 5. 중단 연관 요인지표 3~4칸 묶음 동적 렌더러
-      const metricsContainer = document.getElementById("metrics-container");
-      if (metricsContainer) {
-        const metrics = METRIC_DATA[key] || [];
+      // 요인지표 렌더러 (서버 동적 수합 데이터 렌더링)
+      const mContainer = document.getElementById("metrics-container");
+      if (mContainer) {
         let htmlStr = "";
-        metrics.forEach(m => {
+        (forecastInfo.metrics || []).forEach(m => {
           htmlStr += `
-            <div class="col-md-3">
-              <div class="metric-card shadow-sm d-flex flex-column justify-content-between">
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                  <span class="fw-bold text-dark text-truncate me-2">${m.label}</span>
-                  <span class="badge bg-${m.badge}">${m.cat} · ${m.status}</span>
-                </div>
-                <div class="d-flex justify-content-between align-items-end mt-2">
-                  <h6 class="fw-bold text-danger m-0">${m.val}</h6>
-                  <small class="text-muted" style="font-size: 0.75rem;">${m.date}</small>
-                </div>
+            <div class="metric-card shadow-sm">
+              <div class="d-flex justify-content-between align-items-start mb-1" style="font-size: 0.8rem;">
+                <span class="fw-bold text-dark text-truncate" style="max-width: 130px;">${m.label}</span>
+                <span class="badge bg-${m.badge || 'secondary'}">${m.cat} · ${m.status}</span>
+              </div>
+              <div class="d-flex justify-content-between align-items-end">
+                <span class="fw-bold text-danger" style="font-size: 0.9rem;">${m.val}</span>
+                <small class="text-muted" style="font-size: 0.7rem;">${m.date}</small>
               </div>
             </div>`;
         });
-        metricsContainer.innerHTML = htmlStr;
+        mContainer.innerHTML = htmlStr;
       }
 
-      // 6. 중하단 과거 유사 국면 비교 분석 보고서 동적 렌더러
-      const similaritySection = document.getElementById("similarity-section");
-      const similarityContainer = document.getElementById("similarity-container");
-      if (similaritySection && similarityContainer) {
-        const analogs = SIMILARITY_DATA[key] || [];
+      // 시나리오 렌더러
+      const sContainer = document.getElementById("scenarios-container");
+      if (sContainer) {
+        sContainer.innerHTML = `
+          <div class="col-md-4"><div class="scenario-card" style="border-top: 4px solid #DC3545;"><div class="fw-bold text-danger mb-1">기본 시나리오 (Base) [50%]</div><p class="text-secondary small mb-0">${forecastInfo.rationale_base || "-"}</p></div></div>
+          <div class="col-md-4"><div class="scenario-card" style="border-top: 4px solid #FF9F43;"><div class="fw-bold text-warning mb-1">낙관 시나리오 (Bull) [25%]</div><p class="text-secondary small mb-0">${forecastInfo.rationale_bull || "-"}</p></div></div>
+          <div class="col-md-4"><div class="scenario-card" style="border-top: 4px solid #54A0FF;"><div class="fw-bold text-primary mb-1">비관 시나리오 (Bear) [25%]</div><p class="text-secondary small mb-0">${forecastInfo.rationale_bear || "-"}</p></div></div>`;
+      }
+
+      // 과거 유사 국면 오버레이 비교 차트 구현
+      const simSection = document.getElementById("similarity-section");
+      const simContainer = document.getElementById("similarity-container");
+      if (simSection && simContainer) {
+        const analogs = forecastInfo.analogs || [];
         if (analogs.length > 0) {
-          similaritySection.style.display = "block";
+          simSection.style.display = "block";
           let htmlStr = "";
-          analogs.forEach(a => {
+          analogs.forEach((a, idx) => {
             htmlStr += `
               <div class="col-md-6 mb-3">
                 <div class="similarity-box shadow-sm">
-                  <div class="d-flex justify-content-between align-items-center border-bottom pb-2 mb-3">
-                    <h5 class="fw-bold text-dark m-0"><i class="bi bi-clock-history text-secondary me-2"></i>${a.period}</h5>
-                    <span class="badge bg-success fs-6">국면 유사도 ${a.similarity}</span>
+                  <div class="d-flex justify-content-between align-items-center border-bottom pb-1 mb-2">
+                    <h6 class="fw-bold text-dark m-0"><i class="bi bi-diagram-2 me-1"></i>${a.title}</h6>
+                    <span class="badge bg-success">유사도 ${a.similarity}</span>
                   </div>
-                  <p class="text-secondary small" style="line-height: 1.6; text-align: justify; margin-bottom: 20px; font-size: 0.88rem;">${a.summary}</p>
-                  
-                  <div class="d-flex justify-content-between align-items-center pt-2 border-top">
-                    <div>
-                      <span class="badge bg-danger">전망 정확도 ${a.acc}</span>
-                    </div>
+                  <div class="mb-2">
+                    <small class="text-muted d-block mb-1" style="font-size:0.75rem; font-weight:700;">분석 기간: ${a.period}</small>
+                    <p class="text-secondary small mb-0" style="line-height:1.4; font-size:0.85rem;">${a.summary}</p>
+                  </div>
+                  <div class="p-1 border rounded bg-light mb-2" style="height: 120px;"><canvas id="miniChart_${idx}"></canvas></div>
+                  <div class="d-flex justify-content-between align-items-center pt-2 border-top" style="font-size: 0.8rem;">
+                    <div><span class="badge bg-danger">전망 정확도 ${a.acc}</span></div>
                     <div class="d-flex gap-3 text-end">
-                      <div>
-                        <small class="text-muted d-block" style="font-size: 0.7rem;">모델 전망</small>
-                        <span class="fw-bold text-dark">${a.forecast}</span>
-                      </div>
-                      <div>
-                        <small class="text-muted d-block" style="font-size: 0.7rem;">실제 결과</small>
-                        <span class="fw-bold text-danger">${a.actual}</span>
-                      </div>
+                      <div><small class="text-muted d-block" style="font-size: 0.65rem;">모델전망</small><span class="fw-bold text-dark">${a.forecast}</span></div>
+                      <div><small class="text-muted d-block" style="font-size: 0.65rem;">실제결과</small><span class="fw-bold text-danger">${a.actual}</span></div>
                     </div>
-                  </div>
-                  <div class="text-end mt-3">
-                    <button class="btn btn-sm btn-outline-secondary py-1 px-3" style="font-size: 0.75rem;"><i class="bi bi-download me-1"></i>데이터 다운받기</button>
                   </div>
                 </div>
               </div>`;
           });
-          similarityContainer.innerHTML = htmlStr;
-        } else {
-          similaritySection.style.display = "none";
-        }
+          simContainer.innerHTML = htmlStr;
+
+          analogs.forEach((a, idx) => {
+            const mCtx = document.getElementById(`miniChart_${idx}`).getContext('2d');
+            const mLabels = Array.from({length: (a.miniHist || []).length + (a.miniForecast || []).length}, (_, i) => (i + 1) + "M");
+            
+            const histPart = (a.miniHist || []).concat(Array((a.miniForecast || []).length).fill(null));
+            const mFore = Array((a.miniHist || []).length).fill(null);
+            if ((a.miniHist || []).length > 0) mFore[(a.miniHist || []).length - 1] = a.miniHist[(a.miniHist || []).length - 1];
+            
+            const currentAiForecast = forecastBase.map(item => item.price);
+            const aiForeLine = Array((a.miniHist || []).length - 1).fill(null).concat([a.miniHist[(a.miniHist || []).length - 1] || currentAiForecast[0]]).concat(currentAiForecast);
+
+            new Chart(mCtx, {
+              type: 'line',
+              data: {
+                labels: mLabels,
+                datasets: [
+                  { label: '과거 실적', data: histPart, borderColor: '#1428A0', borderWidth: 1.5, pointRadius: 0, fill: false, tension: 0.3 },
+                  { label: '실제 결과', data: mFore.concat(a.miniForecast || []), borderColor: '#2E7D32', borderWidth: 1.5, borderDash: [3,3], pointRadius: 0, fill: false, tension: 0.3 },
+                  { label: '현재 AI 전망', data: aiForeLine, borderColor: '#DC3545', borderWidth: 2, pointRadius: 0, fill: false, tension: 0.3 }
+                ]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { display: false }, x: { display: false } }
+              }
+            });
+          });
+        } else { simSection.style.display = "none"; }
       }
 
-      // 7. 최하단 향후 6개월간의 고유 가격 전망 순차 리스트 렌더러
-      const rationalesContainer = document.getElementById("forecast-rationales-container");
-      if (rationalesContainer) {
-        let htmlStr = "";
-        forecastList.forEach((item, idx) => {
+      // 6개월 가격 예측 근거 테이블 렌더러
+      const rContainer = document.getElementById("forecast-rationales-container");
+      if (rContainer) {
+        let htmlStr = `
+          <div class="table-responsive">
+            <table class="table table-bordered align-middle m-0" style="font-size: 0.85rem;">
+              <thead class="table-light text-center">
+                <tr><th style="width: 15%;">대상월</th><th style="width: 20%;">전망 가격</th><th style="width: 65%;">예측 근거 및 주요 요인 분석</th></tr>
+              </thead>
+              <tbody>`;
+        (forecastInfo.monthly_forecast_base || forecastBase).forEach(item => {
           htmlStr += `
-            <div class="col-md-4">
-              <div class="p-3 border rounded bg-white h-100 shadow-sm" style="border-left: 4px solid var(--samsung-blue) !important; box-shadow: 0 4px 10px rgba(0,0,0,0.02) !important;">
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                  <span class="badge bg-primary fs-6">${item.month} (E)</span>
-                  <span class="fw-bold text-danger fs-5">${currencySign}${Number(item.price).toLocaleString()}</span>
-                </div>
-                <p class="text-secondary mb-0 small" style="line-height: 1.5; font-size: 0.88rem; text-align: justify;">${item.rationale || "수급 지표 및 매크로 환경 하향/상향 추세가 지지력을 형성할 것으로 분석됩니다."}</p>
-              </div>
-            </div>`;
+            <tr>
+              <td class="text-center fw-bold text-dark"><span class="badge bg-primary">${item.month} (E)</span></td>
+              <td class="text-center fw-bold text-danger">${currencySign}${Number(item.price).toLocaleString()}</td>
+              <td class="text-secondary px-3 py-1" style="line-height: 1.4;">${item.rationale || "매크로 요인 및 원자재 스프레드 변동에 따라 예측가가 조율될 것으로 전망됩니다."}</td>
+            </tr>`;
         });
-        rationalesContainer.innerHTML = htmlStr;
+        htmlStr += `</tbody></table></div>`;
+        rContainer.innerHTML = htmlStr;
       }
     }
   </script>
