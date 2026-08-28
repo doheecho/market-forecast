@@ -15,29 +15,26 @@ if not api_key:
 
 client = genai.Client(api_key=api_key)
 
-# 2. 다변량 핵심 시장 데이터 수집 (글로벌 벤치마크 10대 품목)
+# 2. 다변량 핵심 시장 데이터 수집 (실거래 6대 품목, 월단위 interval="1mo")
 TICKERS = {
-    "copper": "HG=F",       # 구리 (USD/lb) -> LME 톤단가 변환용
-    "aluminum": "ALI=F",    # LME 알루미늄 (USD/mt)
-    "wti": "CL=F",          # CME WTI 원유 (USD/bbl)
-    "gold": "GC=F",         # LBMA 금 (USD/oz.t)
-    "silver": "SI=F",       # LBMA 은 (US￠/oz.t)
-    "platinum": "PL=F",     # CME 백금 (USD/oz.t)
-    "zinc": "ZINC",         # WisdomTree Zinc ETF (LME 아연 싱크)
-    "nickel": "DBB",        # Invesco Base Metals ETF (LME 니켈/구리/아연 복합 비철 지표)
-    "rare_earth": "REMX",   # VanEck Strategic Metals ETF (텅스텐 등 희유금속 글로벌 지표)
-    "steel": "SLX",         # VanEck Steel ETF (철강 완제품 글로벌 지표)
-    "dxy": "DX-Y.NYB",      # 달러 인덱스
-    "us10y": "^TNX",        # 미국 10년물 국채금리
-    "usdcny": "CNY=X",      # 위안화 환율
-    "usdkrw": "KRW=X"       # 원/달러 환율
+    "copper": "HG=F",      # 구리 (USD/lb) -> LME 톤단가 변환용
+    "aluminum": "ALI=F",   # LME 알루미늄 (USD/mt)
+    "wti": "CL=F",         # CME WTI 원유 (USD/bbl)
+    "gold": "GC=F",        # LBMA 금 (USD/oz.t)
+    "silver": "SI=F",      # LBMA 은 (US￠/oz.t)
+    "platinum": "PL=F",    # CME 백금 (USD/oz.t)
+    "dxy": "DX-Y.NYB",     # 달러 인덱스
+    "us10y": "^TNX",       # 미국 10년물 국채금리
+    "usdcny": "CNY=X",     # 위안화 환율
+    "usdkrw": "KRW=X"      # 원/달러 환율
 }
 
-print("[진행] 야후 파이낸스에서 3년 일단위 시계열 데이터 수집 중...")
+print("[진행] 야후 파이낸스에서 3년 월단위 시계열 데이터 수집 중...")
 hist_data = {}
 for name, ticker in TICKERS.items():
   try:
-    df = yf.Ticker(ticker).history(period="3y", interval="1d")["Close"]
+    # 차트 가로폭 대칭화를 위해 월 단위 interval="1mo" 로 원복 수집
+    df = yf.Ticker(ticker).history(period="3y", interval="1mo")["Close"]
     df = df.dropna()
     hist_data[name] = df
   except Exception as e:
@@ -45,25 +42,16 @@ for name, ticker in TICKERS.items():
     hist_data[name] = pd.Series(dtype=float)
 
 
-# 10대 글로벌 핵심 원자재 가격 생성 함수 (일단위 및 월단위)
-def generate_10_commodities(is_daily=True):
+# 6대 원자재 월 단위 가격 생성 함수
+def generate_6_commodities():
   pivot_series = hist_data.get("copper", pd.Series())
   if pivot_series.empty:
     pivot_series = hist_data.get("wti", pd.Series())
 
-  res = {
-      k: []
-      for k in [
-          "wti", "copper", "aluminum", "gold", "silver", 
-          "platinum", "zinc", "nickel", "tungsten", "steel"
-      ]
-  }
+  res = {k: [] for k in ["wti", "copper", "aluminum", "gold", "silver", "platinum"]}
 
   for idx, val in pivot_series.items():
-    if is_daily:
-      date_str = idx.strftime("%Y-%m-%d")
-    else:
-      date_str = idx.strftime("%Y-%m")
+    date_str = idx.strftime("%Y-%m")
 
     try:
       cop = float(val)
@@ -95,93 +83,18 @@ def generate_10_commodities(is_daily=True):
     except:
       plat_val = 1000.0
 
-    try:
-      zinc_val = float(hist_data["zinc"].loc[idx]) if idx in hist_data["zinc"].index else 25.0
-    except:
-      zinc_val = 25.0
-
-    try:
-      nick_val = float(hist_data["nickel"].loc[idx]) if idx in hist_data["nickel"].index else 20.0
-    except:
-      nick_val = 20.0
-
-    try:
-      rare_val = float(hist_data["rare_earth"].loc[idx]) if idx in hist_data["rare_earth"].index else 80.0
-    except:
-      rare_val = 80.0
-
-    try:
-      steel_val = float(hist_data["steel"].loc[idx]) if idx in hist_data["steel"].index else 100.0
-    except:
-      steel_val = 100.0
-
-    # 10대 실거래 원자재 가치 가공 적용
     res["wti"].append({"date": date_str, "price": round(wti_val, 2)})
     res["copper"].append({"date": date_str, "price": round(cop * 2204.62, 1)})
     res["aluminum"].append({"date": date_str, "price": round(alu_val, 1)})
     res["gold"].append({"date": date_str, "price": round(gold_val, 2)})
     res["silver"].append({"date": date_str, "price": round(sil_val, 2)})
     res["platinum"].append({"date": date_str, "price": round(plat_val, 2)})
-    res["zinc"].append({"date": date_str, "price": round(zinc_val, 2)})
-    res["nickel"].append({"date": date_str, "price": round(nick_val, 2)})
-    res["tungsten"].append({"date": date_str, "price": round(rare_val, 2)})
-    res["steel"].append({"date": date_str, "price": round(steel_val, 2)})
 
   return res
 
 
-# pandas ME와 M 호환 다운샘플링용 헬퍼
-def format_history_monthly_resample(series):
-  try:
-    return series.resample("ME").last().dropna()
-  except ValueError:
-    return series.resample("M").last().dropna()
-
-
 # 월간 AI용 요약 패킷 가공
-cop_m = format_history_monthly_resample(hist_data.get("copper", pd.Series()))
-wti_m = format_history_monthly_resample(hist_data.get("wti", pd.Series()))
-alu_m = format_history_monthly_resample(hist_data.get("aluminum", pd.Series()))
-gold_m = format_history_monthly_resample(hist_data.get("gold", pd.Series()))
-sil_m = format_history_monthly_resample(hist_data.get("silver", pd.Series()))
-plat_m = format_history_monthly_resample(hist_data.get("platinum", pd.Series()))
-zinc_m = format_history_monthly_resample(hist_data.get("zinc", pd.Series()))
-nick_m = format_history_monthly_resample(hist_data.get("nickel", pd.Series()))
-rare_m = format_history_monthly_resample(hist_data.get("rare_earth", pd.Series()))
-steel_m = format_history_monthly_resample(hist_data.get("steel", pd.Series()))
-
-res_m = {
-    k: []
-    for k in [
-        "wti", "copper", "aluminum", "gold", "silver", 
-        "platinum", "zinc", "nickel", "tungsten", "steel"
-    ]
-}
-pivot_m = cop_m if not cop_m.empty else wti_m
-
-for idx, val in pivot_m.items():
-  date_str = idx.strftime("%Y-%m")
-  cop = float(val) if not pivot_m.empty else 4.0
-  wti_val = float(wti_m.loc[idx]) if idx in wti_m.index else 75.0
-  alu_val = float(alu_m.loc[idx]) if idx in alu_m.index else 2200.0
-  gold_val = float(gold_m.loc[idx]) if idx in gold_m.index else 2300.0
-  sil_val = float(sil_m.loc[idx]) if idx in sil_m.index else 28.0
-  plat_val = float(plat_m.loc[idx]) if idx in plat_m.index else 1000.0
-  zinc_val = float(zinc_m.loc[idx]) if idx in zinc_m.index else 25.0
-  nick_val = float(nick_m.loc[idx]) if idx in nick_m.index else 20.0
-  rare_val = float(rare_m.loc[idx]) if idx in rare_m.index else 80.0
-  steel_val = float(steel_m.loc[idx]) if idx in steel_m.index else 100.0
-
-  res_m["wti"].append({"date": date_str, "price": round(wti_val, 2)})
-  res_m["copper"].append({"date": date_str, "price": round(cop * 2204.62, 1)})
-  res_m["aluminum"].append({"date": date_str, "price": round(alu_val, 1)})
-  res_m["gold"].append({"date": date_str, "price": round(gold_val, 2)})
-  res_m["silver"].append({"date": date_str, "price": round(sil_val, 2)})
-  res_m["platinum"].append({"date": date_str, "price": round(plat_val, 2)})
-  res_m["zinc"].append({"date": date_str, "price": round(zinc_val, 2)})
-  res_m["nickel"].append({"date": date_str, "price": round(nick_val, 2)})
-  res_m["tungsten"].append({"date": date_str, "price": round(rare_val, 2)})
-  res_m["steel"].append({"date": date_str, "price": round(steel_val, 2)})
+res_m = generate_6_commodities()
 
 market_summary_for_ai = {
     "update_date": datetime.now().strftime("%Y-%m-%d"),
@@ -210,11 +123,11 @@ market_summary_for_ai = {
     "history": res_m,
 }
 
-# 3. 고도화된 Gemini 프롬프트 구성 (3대 시나리오 Base/Bull/Bear 밴드 정량 예측 및 정성 근거 분기 도출)
+# 3. 고도화된 Gemini 프롬프트 구성 (Planning Advisor 및 월별 순차적 고유 예측 근거 강제 수집)
 prompt = f"""
 당신은 글로벌 원자재 및 거시경제 퀀트 분석 수석 애널리스트입니다.
 아래 제공된 [3년간의 월별 과거 시계열 데이터]와 [거시경제 지표]를 종합하여,
-10대 대표 실거래 원자재 각각에 대해 '향후 6개월간(M+1 ~ M+6)의 3가지 시나리오별 가격 예측 궤적'과 '각 시나리오별 예측 근거'를 독립 작성하세요.
+6대 실거래 원자재 각각에 대한 'Planning Advisor 추천 전략 요약 멘트'와 '향후 6개월간(M+1 ~ M+6)의 월별 가격 예측 및 월별 순차 고유 예측 근거'를 작성하세요.
 
 [분석 타깃 품목]
 1. wti: WTI 원유 (bbl)
@@ -223,15 +136,13 @@ prompt = f"""
 4. gold: 금 (LBMA/oz.t)
 5. silver: 은 (LBMA/US￠/oz.t)
 6. platinum: 백금 (CME/oz.t)
-7. zinc: 아연 (LME 대리 ZINC ETF/share)
-8. nickel: 니켈 (LME 대리 DBB ETF/share)
-9. tungsten: 텅스텐/희유금속 (대리 REMX ETF/share)
-10. steel: 철강 완제품 (대리 SLX ETF/share)
 
-[3대 다변량 시나리오 규칙]
-1. Base (기본 시나리오, 50% 확률): 대내외 거시 매크로 변동성이 상호 상쇄되며 가장 실현 확률이 높은 균형 잡힌 가격 흐름.
-2. Bull (낙관 시나리오, 25% 확률): 공급망 병목 심화, 원료 공급 제약, 지정학적 리스크 격화, 연준의 급격한 금리 인하 등에 기인한 가격 상방 돌파 흐름.
-3. Bear (비관 시나리오, 25% 확률): 글로벌 제조업 PMI 위축 지속, 달러화 초강세, 실물 경기 둔화 등에 기인한 가격 하방 제약 흐름.
+[추천 전략 멘트 (planning_advisor) 가이드라인]
+- 해당 품목의 향후 6개월 가격 등락률 전망과 함께, 구매 부서 입장에서 언제 매입하고 물량을 얼마나 확보해야 하는지 최적의 구매 의사결정 전략을 전문적인 2문장 볼드체 멘트로 요약 작성하세요.
+- 예시: "전기동 가격은 향후 6개월간 약 13.3% 상승할 전망입니다. 6개월 내 가격이 급등하여 16,000달러 선 돌파 가능성이 있으니 구매 시점과 물량 확보 전략을 최적화하시기 바랍니다."
+
+[월별 세부 예측 근거 가이드라인]
+- 매월 예측되는 가격에 맞춰, 해당 월에 발생할 구체적인 시황 및 수요/공급 변동성 요인을 월별로 **완전하게 다른 고유한 내용**으로 1~2문장 기술하세요 (매월 내용이 절대 중복되거나 일률적이지 않아야 합니다).
 
 [시장 입력 데이터]
 {json.dumps(market_summary_for_ai, ensure_ascii=False)}
@@ -248,48 +159,26 @@ prompt = f"""
       "forecast_change_rate": "+0.0%", 
       "direction": "상승/하락/보합", 
       "volatility_score": 0, 
-      "rationale_base": "기본 시나리오 상세 예측 근거 (수급, 유량, 거시경제 매크로 등을 반영하여 구매보고서 바로 인용 사양으로 3문장 작성)", 
-      "rationale_bull": "낙관 시나리오 상세 예측 근거 (가격 상승 드라이버 및 트리거 요인 위주 3문장 작성)", 
-      "rationale_bear": "비관 시나리오 상세 예측 근거 (가격 하방 제약 및 리스크 요인 위주 3문장 작성)", 
-      "monthly_forecast_base": [
-        {{"month": "2026-09", "price": 0.0}}, 
-        {{"month": "2026-10", "price": 0.0}}, 
-        {{"month": "2026-11", "price": 0.0}}, 
-        {{"month": "2026-12", "price": 0.0}}, 
-        {{"month": "2027-01", "price": 0.0}}, 
-        {{"month": "2027-02", "price": 0.0}}
-      ],
-      "monthly_forecast_bull": [
-        {{"month": "2026-09", "price": 0.0}}, 
-        {{"month": "2026-10", "price": 0.0}}, 
-        {{"month": "2026-11", "price": 0.0}}, 
-        {{"month": "2026-12", "price": 0.0}}, 
-        {{"month": "2027-01", "price": 0.0}}, 
-        {{"month": "2027-02", "price": 0.0}}
-      ],
-      "monthly_forecast_bear": [
-        {{"month": "2026-09", "price": 0.0}}, 
-        {{"month": "2026-10", "price": 0.0}}, 
-        {{"month": "2026-11", "price": 0.0}}, 
-        {{"month": "2026-12", "price": 0.0}}, 
-        {{"month": "2027-01", "price": 0.0}}, 
-        {{"month": "2027-02", "price": 0.0}}
+      "planning_advisor": "6개월 가격 등락률 전망 및 추천 구매 시점/물량 확보 가이드 요약 (전문적 2문장 볼드체)",
+      "monthly_forecast": [
+        {{"month": "2026-09", "price": 0.0, "rationale": "9월 시황 수급 요인 및 예측 가격 도출의 구체적 고유 근거 (내용 중복 엄금)"}}, 
+        {{"month": "2026-10", "price": 0.0, "rationale": "10월 시황 공급망 병목 및 정밀 예측 고유 근거"}}, 
+        {{"month": "2026-11", "price": 0.0, "rationale": "11월 미국 대선 및 달러화 경로 연계 예측 고유 근거"}}, 
+        {{"month": "2026-12", "price": 0.0, "rationale": "12월 연말 계절적 난방 수요 및 재고 추이 예측 고유 근거"}}, 
+        {{"month": "2027-01", "price": 0.0, "rationale": "1월 아시아 실물 소비 및 연초 생산 가동 예측 고유 근거"}}, 
+        {{"month": "2027-02", "price": 0.0, "rationale": "2월 중국 춘절 연휴 및 계절적 비성기 공급 조율 예측 고유 근거"}}
       ]
     }},
-    "copper": {{ "name": "전기동 (LME)", "unit": "USD/ton", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승/하락/보합", "volatility_score": 0, "rationale_base": "...", "rationale_bull": "...", "rationale_bear": "...", "monthly_forecast_base": [...], "monthly_forecast_bull": [...], "monthly_forecast_bear": [...] }},
+    "copper": {{ "name": "전기동 (LME)", "unit": "USD/ton", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승/하락/보합", "volatility_score": 0, "planning_advisor": "...", "monthly_forecast": [...] }},
     "aluminum": {{ ... }},
     "gold": {{ ... }},
     "silver": {{ ... }},
-    "platinum": {{ ... }},
-    "zinc": {{ ... }},
-    "nickel": {{ ... }},
-    "tungsten": {{ ... }},
-    "steel": {{ ... }}
+    "platinum": {{ ... }}
   }}
 }}
 """
 
-print("[진행] Gemini 3.6/2.5/1.5 다변량 시계열 3대 시나리오 연산 수행 중...")
+print("[진행] Gemini 3.6/2.5/1.5 다변량 시계열 정밀 연산 수행 중...")
 
 # 다중 모델 폴백 및 지수 백오프 자동 재시도 시스템 구축 (503 UNAVAILABLE 완벽 대응)
 MAX_RETRIES = 5
@@ -299,7 +188,7 @@ last_exception = None
 success = False
 
 for model_name in MODELS_TO_TRY:
-  print(f"[진행] {model_name} 모델로 원자재 3대 시나리오 예측 시도 중...")
+  print(f"[진행] {model_name} 모델로 원자재 기획 예측 시도 중...")
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
@@ -331,14 +220,11 @@ else:
 try:
   result_json = json.loads(response.text)
 
-  # 일간 10종 정밀 시계열 생성
-  history_daily_out = generate_10_commodities(is_daily=True)
-
-  # 데이터 결합
+  # 데이터 결합 (과거도 동일한 월단위 수집 데이터셋 반영)
   final_output = {
       "update_date": market_summary_for_ai["update_date"],
       "macro": market_summary_for_ai["macro"],
-      "history_3y": history_daily_out,
+      "history_3y": res_m,
       "forecast_data": result_json["commodities"],
   }
 
@@ -347,7 +233,7 @@ try:
 
   print(
       f"[성공] raw_materials_forecast.json 생성 완료:"
-      f" {market_summary_for_ai['update_date']} (3대 시나리오 밴드 정밀 데이터 전수 이식 완수)"
+      f" {market_summary_for_ai['update_date']} (Planning Advisor 및 월별 순차적 고유근거 탑재 버전)"
   )
 
 except Exception as e:
