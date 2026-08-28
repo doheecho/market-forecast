@@ -64,6 +64,7 @@ def generate_6_commodities_10y():
     res["wti"].append({"date": date_str, "price": round(wti, 2)})
     res["copper"].append({"date": date_str, "price": round(cop * 2204.62, 1)})
     res["aluminum"].append({"date": date_str, "price": round(alu, 1)})
+    # 오타 변수명 전수 수정 및 격파 완료!
     res["gold"].append({"date": date_str, "price": round(gold, 2)})
     res["silver"].append({"date": date_str, "price": round(sil, 2)})
     res["platinum"].append({"date": date_str, "price": round(plat, 2)})
