@@ -3,7 +3,7 @@
 <head>
   <base target="_top">
   <meta charset="utf-8">
-  <title>6대 실거래 원자재 AI 가격 전망</title>
+  <title>10대 실거래 원자재 AI 가격 전망</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -11,31 +11,35 @@
     :root { --samsung-blue: #1428A0; --bg-color: #f4f7f9; }
     body { background-color: var(--bg-color); font-family: 'Noto Sans KR', sans-serif; padding: 20px; }
     .header-bar { background: var(--samsung-blue); color: white; padding: 15px 25px; border-radius: 10px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
-    .nav-pills .nav-link { color: #555; font-weight: 500; border-radius: 8px; margin-right: 5px; cursor: pointer; border: 1px solid #e0e0e0; background: white; padding: 10px 18px; }
+    .nav-pills .nav-link { color: #555; font-weight: 500; border-radius: 8px; margin-right: 5px; cursor: pointer; border: 1px solid #e0e0e0; background: white; padding: 10px 15px; margin-bottom: 8px; }
     .nav-pills .nav-link.active { background-color: var(--samsung-blue) !important; color: white !important; border-color: var(--samsung-blue) !important; }
     .card-custom { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border: 1px solid #e0e0e0; padding: 25px; margin-bottom: 20px; }
     .stat-badge { font-size: 0.85rem; padding: 5px 10px; border-radius: 6px; font-weight: 600; }
-    .rationale-box { background-color: #f8faff; border-left: 4px solid var(--samsung-blue); padding: 15px 20px; border-radius: 4px; margin-top: 20px; }
     .chart-container { position: relative; height: 420px; width: 100%; }
+    .scenario-card { border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; height: 100%; background: white; box-shadow: 0 4px 10px rgba(0,0,0,0.02); }
   </style>
 </head>
 <body>
   <div class="container-fluid">
     <div class="header-bar">
       <div>
-        <h4 class="m-0 fw-bold">🌐 6대 핵심 원자재 AI 시황 및 6개월 가격 예측</h4>
-        <small class="opacity-75">야후 파이낸스 실거래 기준 + 다변량 AI 6개월 시나리오 예측 모델</small>
+        <h4 class="m-0 fw-bold">🌐 10대 핵심 원자재 AI 시황 및 6개월 가격 예측</h4>
+        <small class="opacity-75">과거 3년 고정밀 실적 + 3대 시나리오별 가격 예측 밴드(Area Shading) 모델</small>
       </div>
       <div id="update-badge" class="badge bg-light text-dark fs-6">기준일: -</div>
     </div>
 
-    <!-- 6종 원자재 탭 네비게이션 (WTI 기본 활성) -->
+    <!-- 10종 원자재 탭 네비게이션 (WTI 기본 활성) -->
     <ul class="nav nav-pills mb-4" id="commodityTabs">
       <li class="nav-item"><button class="nav-link active" onclick="switchCommodity('wti', this)">WTI 원유 (CME)</button></li>
       <li class="nav-item"><button class="nav-link" onclick="switchCommodity('copper', this)">전기동 (LME)</button></li>
       <li class="nav-item"><button class="nav-link" onclick="switchCommodity('aluminum', this)">알루미늄 (LME)</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('zinc', this)">아연 (LME 대리)</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('nickel', this)">니켈 (LME 대리)</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('tungsten', this)">텅스텐 (글로벌대리)</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('steel', this)">철강 (글로벌대리)</button></li>
       <li class="nav-item"><button class="nav-link" onclick="switchCommodity('gold', this)">금 (LBMA)</button></li>
-      <li class="nav-item"><button class="nav-link" onclick="switchCommodity('silver', this)">은 (LBMA)</button></li>
+      <li class="nav-item"><button class="nav-link" onclick="silversilver" onclick="switchCommodity('silver', this)">은 (LBMA)</button></li>
       <li class="nav-item"><button class="nav-link" onclick="switchCommodity('platinum', this)">백금 (CME)</button></li>
     </ul>
 
@@ -43,7 +47,7 @@
     <div class="card-custom">
       <div id="loading" class="text-center py-5">
         <div class="spinner-border text-primary" role="status"></div>
-        <p class="mt-3 text-muted">야후 파이낸스 실거래 시계열 및 예측 데이터를 로드 중입니다...</p>
+        <p class="mt-3 text-muted">야후 파이낸스 실거래 및 AI 3대 시나리오 예측 데이터를 분석 중입니다...</p>
       </div>
 
       <div id="dashboard-content" style="display: none;">
@@ -51,14 +55,14 @@
         <div class="row text-center mb-4 g-3">
           <div class="col-md-3">
             <div class="p-3 border rounded bg-light">
-              <div class="text-muted small">현재가</div>
+              <div class="text-muted small">현재 실거래가</div>
               <h4 class="fw-bold my-1 text-dark" id="kpi-current">-</h4>
               <small class="text-muted" id="kpi-unit">-</small>
             </div>
           </div>
           <div class="col-md-3">
             <div class="p-3 border rounded bg-light">
-              <div class="text-muted small">6개월 후 AI 목표가</div>
+              <div class="text-muted small">6개월 후 AI 목표가 (Base)</div>
               <h4 class="fw-bold my-1 text-danger" id="kpi-target">-</h4>
               <span id="kpi-rate" class="stat-badge bg-danger text-white">+0.0%</span>
             </div>
@@ -79,17 +83,14 @@
           </div>
         </div>
 
-        <!-- 과거 3년 + 미래 6개월 통합 차트 -->
+        <!-- 과거 3년 + 미래 3대 시나리오 통합 차트 -->
         <div class="chart-container">
           <canvas id="mainChart"></canvas>
         </div>
 
-        <!-- 하단 AI 산정 근거 및 인사이트 -->
-        <div class="rationale-box">
-          <h6 class="fw-bold text-dark d-flex align-items-center">
-            <span class="me-2">💡</span> AI 예측 산정 근거 (Quant & Supply/Demand Analysis)
-          </h6>
-          <p id="rationale-text" class="text-secondary mb-0" style="line-height: 1.6; font-size: 0.95rem;">-</p>
+        <!-- 하단 AI 3대 시나리오별 상세 예측 근거 리포트 섹션 -->
+        <div class="row mt-4" id="scenarios-container">
+          <!-- JS로 동적 3단 리포트 카드 생성 -->
         </div>
       </div>
     </div>
@@ -147,7 +148,9 @@
       }
 
       const historyList = (globalData.history_3y && globalData.history_3y[key]) ? globalData.history_3y[key] : [];
-      const forecastList = forecastInfo.monthly_forecast || [];
+      const forecastBase = forecastInfo.monthly_forecast_base || [];
+      const forecastBull = forecastInfo.monthly_forecast_bull || [];
+      const forecastBear = forecastInfo.monthly_forecast_bear || [];
 
       // 통화 단위 포맷 분기화 (한화/센트/달러 기호 매칭)
       const isCent = forecastInfo.unit.includes("US￠") || forecastInfo.unit.includes("￠");
@@ -160,33 +163,41 @@
       document.getElementById("kpi-rate").innerText = forecastInfo.forecast_change_rate;
       document.getElementById("kpi-direction").innerText = forecastInfo.direction;
       document.getElementById("kpi-volatility").innerText = forecastInfo.volatility_score;
-      document.getElementById("rationale-text").innerText = forecastInfo.rationale;
 
-      // 2. 과거 3년(Daily) + 미래 6개월(Monthly) 시계열 결합
+      // 2. 과거 3년(Daily) + 미래 6개월(3대 시나리오) 시계열 결합
       const allLabels = [];
       const histPrices = [];
-      const forePrices = [];
+      const foreBase = [];
+      const foreBull = [];
+      const foreBear = [];
 
       // 과거 데이터 채우기 (Daily)
       historyList.forEach(item => {
         allLabels.push(item.date);
         histPrices.push(item.price);
-        forePrices.push(null);
+        foreBase.push(null);
+        foreBull.push(null);
+        foreBear.push(null);
       });
 
-      // 연결점 처리 (과거 마지막 값에서 점선 시작)
+      // 연결점 처리 (과거 마지막 값에서 시나리오들 시작)
       if (histPrices.length > 0) {
-        forePrices[histPrices.length - 1] = histPrices[histPrices.length - 1];
+        const lastPrice = histPrices[histPrices.length - 1];
+        foreBase[histPrices.length - 1] = lastPrice;
+        foreBull[histPrices.length - 1] = lastPrice;
+        foreBear[histPrices.length - 1] = lastPrice;
       }
 
-      // 미래 6개월 데이터 채우기 (Monthly)
-      forecastList.forEach(item => {
+      // 미래 6개월 시나리오 데이터 채우기 (Monthly)
+      forecastBase.forEach((item, idx) => {
         allLabels.push(item.month + " (E)");
         histPrices.push(null);
-        forePrices.push(item.price);
+        foreBase.push(item.price);
+        foreBull.push(forecastBull[idx] ? forecastBull[idx].price : null);
+        foreBear.push(forecastBear[idx] ? forecastBear[idx].price : null);
       });
 
-      // 3. Chart.js 렌더링
+      // 3. Chart.js 렌더링 (Area Shading 예측 밴드 구현)
       if (currentChart) currentChart.destroy();
       const ctx = document.getElementById('mainChart').getContext('2d');
       
@@ -196,25 +207,45 @@
           labels: allLabels,
           datasets: [
             {
-              label: '과거 3년 실적 (' + forecastInfo.unit + ') [Daily]',
+              label: '과거 3년 실적 (' + forecastInfo.unit + ')',
               data: histPrices,
               borderColor: '#1428A0',
-              backgroundColor: 'rgba(20, 40, 160, 0.05)',
+              backgroundColor: 'rgba(20, 40, 160, 0.03)',
               borderWidth: 2,
-              pointRadius: 0,               // 평소에는 일일 점을 숨김 (라인 품질 극대화)
-              pointHitRadius: 10,           // 마우스 반응 반경 확대
-              pointHoverRadius: 4,          // 호버 시 점 확대
-              pointHoverBackgroundColor: '#1428A0',
+              pointRadius: 0,
+              pointHitRadius: 10,
+              pointHoverRadius: 4,
               fill: true,
               tension: 0.1
             },
             {
-              label: '향후 6개월 AI 예측 (' + forecastInfo.unit + ') [Monthly]',
-              data: forePrices,
+              label: '낙관 전망 (Bull Scenario)',
+              data: foreBull,
+              borderColor: '#FF9F43',
+              backgroundColor: 'transparent',
+              borderWidth: 1.5,
+              borderDash: [4, 4],
+              pointRadius: 0,
+              fill: false,
+              tension: 0.2
+            },
+            {
+              label: '비관 전망 (Bear Scenario)',
+              data: foreBear,
+              borderColor: '#54A0FF',
+              backgroundColor: 'rgba(100, 110, 140, 0.05)', // Shading: Bull(Dataset 1)과 Bear(Dataset 2) 사이 음영 채우기
+              borderWidth: 1.5,
+              borderDash: [4, 4],
+              pointRadius: 0,
+              fill: '-1',                                    // 바로 위 데이터셋(Bull)과의 사이 영역 채우기 지시!
+              tension: 0.2
+            },
+            {
+              label: '기본 전망 (Base Scenario)',
+              data: foreBase,
               borderColor: '#DC3545',
-              backgroundColor: 'rgba(220, 53, 69, 0.1)',
-              borderWidth: 2.5,
-              borderDash: [5, 5],
+              backgroundColor: 'transparent',
+              borderWidth: 3,
               pointRadius: 4,
               pointBackgroundColor: '#DC3545',
               pointHoverRadius: 6,
@@ -232,7 +263,7 @@
             tooltip: {
               callbacks: {
                 label: function(context) {
-                  return context.dataset.label.split(' [')[0] + ': ' + currencySign + Number(context.raw).toLocaleString();
+                  return context.dataset.label + ': ' + currencySign + Number(context.raw).toLocaleString();
                 }
               }
             }
@@ -250,14 +281,72 @@
             x: {
               grid: { display: false },
               ticks: {
-                maxTicksLimit: 15,       // 고정민 750개 데이터 중 15개 이내만 균등 눈금 표시 (겹침 원천 제거!)
-                maxRotation: 0,          // 언제나 수평하게 표시하여 미적 단정함 유지
-                font: { size: 11, weight: '500' }
+                maxRotation: 0,
+                font: { size: 10, weight: '500' },
+                callback: function(value, index, values) {
+                  const label = allLabels[index];
+                  if (!label) return '';
+                  if (label.includes("(E)")) return label;
+                  
+                  const dateParts = label.split('-');
+                  if (dateParts.length === 3) {
+                    const nextLabel = allLabels[index + 1];
+                    if (!nextLabel || nextLabel.includes("(E)")) return dateParts[0] + '-' + dateParts[1];
+                    const nextDateParts = nextLabel.split('-');
+                    if (dateParts[1] !== nextDateParts[1]) return dateParts[0] + '-' + dateParts[1]; // 월말 Ticks 제어
+                  }
+                  return '';
+                }
               }
             }
           }
         }
       });
+
+      // 4. 하단 3대 가격 예측 시나리오 전문 리포트 3단 카드 생성
+      const scenariosContainer = document.getElementById("scenarios-container");
+      if (scenariosContainer) {
+        scenariosContainer.innerHTML = `
+          <div class="col-12 mb-3">
+            <h5 class="fw-bold text-dark d-flex align-items-center">
+              <span class="me-2">📊</span> AI 다변량 시나리오 가격 예측 근거 리포트 (Scenario Report)
+            </h5>
+          </div>
+          <div class="col-md-4 mb-3">
+            <div class="scenario-card" style="border-top: 5px solid #DC3545 !important;">
+              <h6 class="fw-bold text-danger mb-3 d-flex justify-content-between align-items-center">
+                <span>🟢 Base (기본 시나리오)</span>
+                <span class="badge bg-danger">확률 50%</span>
+              </h6>
+              <p class="text-secondary small" style="line-height: 1.6; font-size: 0.92rem; text-align: justify;">
+                ${forecastInfo.rationale_base}
+              </p>
+            </div>
+          </div>
+          <div class="col-md-4 mb-3">
+            <div class="scenario-card" style="border-top: 5px solid #FF9F43 !important;">
+              <h6 class="fw-bold text-warning mb-3 d-flex justify-content-between align-items-center">
+                <span>🟠 Bull (낙관 시나리오)</span>
+                <span class="badge bg-warning text-dark">확률 25%</span>
+              </h6>
+              <p class="text-secondary small" style="line-height: 1.6; font-size: 0.92rem; text-align: justify;">
+                ${forecastInfo.rationale_bull}
+              </p>
+            </div>
+          </div>
+          <div class="col-md-4 mb-3">
+            <div class="scenario-card" style="border-top: 5px solid #54A0FF !important;">
+              <h6 class="fw-bold text-primary mb-3 d-flex justify-content-between align-items-center">
+                <span>🔵 Bear (비관 시나리오)</span>
+                <span class="badge bg-primary">확률 25%</span>
+              </h6>
+              <p class="text-secondary small" style="line-height: 1.6; font-size: 0.92rem; text-align: justify;">
+                ${forecastInfo.rationale_bear}
+              </p>
+            </div>
+          </div>
+        `;
+      }
     }
   </script>
 </body>
