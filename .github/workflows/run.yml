@@ -5,6 +5,10 @@ on:
     - cron: '0 22 * * *' # 매일 UTC 22:00 (한국 시간 오전 07:00) 크론 자동 기동
   workflow_dispatch:      # 수동 트리거 지원
 
+# 깃허브 액션 봇에 저장소 파일 쓰기(Push) 권한 전격 부여 (403 Permission Denied 해결 마스터키)
+permissions:
+  contents: write
+
 jobs:
   run-forecasting-quant:
     runs-on: ubuntu-latest
