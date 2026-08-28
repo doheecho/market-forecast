@@ -210,11 +210,11 @@ market_summary_for_ai = {
     "history": res_m,
 }
 
-# 3. 고도화된 Gemini 프롬프트 구성 (6개월 월별 세부 예측 근거 스키마 정렬 추가)
+# 3. 고도화된 Gemini 프롬프트 구성 (3대 시나리오 Base/Bull/Bear 밴드 정량 예측 및 정성 근거 분기 도출)
 prompt = f"""
 당신은 글로벌 원자재 및 거시경제 퀀트 분석 수석 애널리스트입니다.
 아래 제공된 [3년간의 월별 과거 시계열 데이터]와 [거시경제 지표]를 종합하여,
-10대 대표 실거래 원자재 각각에 대한 '향후 6개월간(M+1 ~ M+6)의 정밀 가격 예측'과 '전체 산정 근거 요약', 그리고 '월별 세부 예측 근거'를 함께 작성하세요.
+10대 대표 실거래 원자재 각각에 대해 '향후 6개월간(M+1 ~ M+6)의 3가지 시나리오별 가격 예측 궤적'과 '각 시나리오별 예측 근거'를 독립 작성하세요.
 
 [분석 타깃 품목]
 1. wti: WTI 원유 (bbl)
@@ -227,6 +227,11 @@ prompt = f"""
 8. nickel: 니켈 (LME 대리 DBB ETF/share)
 9. tungsten: 텅스텐/희유금속 (대리 REMX ETF/share)
 10. steel: 철강 완제품 (대리 SLX ETF/share)
+
+[3대 다변량 시나리오 규칙]
+1. Base (기본 시나리오, 50% 확률): 대내외 거시 매크로 변동성이 상호 상쇄되며 가장 실현 확률이 높은 균형 잡힌 가격 흐름.
+2. Bull (낙관 시나리오, 25% 확률): 공급망 병목 심화, 원료 공급 제약, 지정학적 리스크 격화, 연준의 급격한 금리 인하 등에 기인한 가격 상방 돌파 흐름.
+3. Bear (비관 시나리오, 25% 확률): 글로벌 제조업 PMI 위축 지속, 달러화 초강세, 실물 경기 둔화 등에 기인한 가격 하방 제약 흐름.
 
 [시장 입력 데이터]
 {json.dumps(market_summary_for_ai, ensure_ascii=False)}
@@ -243,8 +248,10 @@ prompt = f"""
       "forecast_change_rate": "+0.0%", 
       "direction": "상승/하락/보합", 
       "volatility_score": 0, 
-      "rationale": "전체 산정 근거 요약 (3~4문장)", 
-      "monthly_forecast": [
+      "rationale_base": "기본 시나리오 상세 예측 근거 (수급, 유량, 거시경제 매크로 등을 반영하여 구매보고서 바로 인용 사양으로 3문장 작성)", 
+      "rationale_bull": "낙관 시나리오 상세 예측 근거 (가격 상승 드라이버 및 트리거 요인 위주 3문장 작성)", 
+      "rationale_bear": "비관 시나리오 상세 예측 근거 (가격 하방 제약 및 리스크 요인 위주 3문장 작성)", 
+      "monthly_forecast_base": [
         {{"month": "2026-09", "price": 0.0}}, 
         {{"month": "2026-10", "price": 0.0}}, 
         {{"month": "2026-11", "price": 0.0}}, 
@@ -252,16 +259,24 @@ prompt = f"""
         {{"month": "2027-01", "price": 0.0}}, 
         {{"month": "2027-02", "price": 0.0}}
       ],
-      "monthly_rationales": [
-        {{"month": "2026-09", "rationale": "9월 시황 및 정밀 가격 예측 근거 (1~2문장)"}},
-        {{"month": "2026-10", "rationale": "10월 시황 및 정밀 가격 예측 근거 (1~2문장)"}},
-        {{"month": "2026-11", "rationale": "11월 시황 및 정밀 가격 예측 근거 (1~2문장)"}},
-        {{"month": "2026-12", "rationale": "12월 시황 및 정밀 가격 예측 근거 (1~2문장)"}},
-        {{"month": "2027-01", "rationale": "1월 시황 및 정밀 가격 예측 근거 (1~2문장)"}},
-        {{"month": "2027-02", "rationale": "2월 시황 및 정밀 가격 예측 근거 (1~2문장)"}}
+      "monthly_forecast_bull": [
+        {{"month": "2026-09", "price": 0.0}}, 
+        {{"month": "2026-10", "price": 0.0}}, 
+        {{"month": "2026-11", "price": 0.0}}, 
+        {{"month": "2026-12", "price": 0.0}}, 
+        {{"month": "2027-01", "price": 0.0}}, 
+        {{"month": "2027-02", "price": 0.0}}
+      ],
+      "monthly_forecast_bear": [
+        {{"month": "2026-09", "price": 0.0}}, 
+        {{"month": "2026-10", "price": 0.0}}, 
+        {{"month": "2026-11", "price": 0.0}}, 
+        {{"month": "2026-12", "price": 0.0}}, 
+        {{"month": "2027-01", "price": 0.0}}, 
+        {{"month": "2027-02", "price": 0.0}}
       ]
     }},
-    "copper": {{ "name": "전기동 (LME)", "unit": "USD/ton", ... }},
+    "copper": {{ "name": "전기동 (LME)", "unit": "USD/ton", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "direction": "상승/하락/보합", "volatility_score": 0, "rationale_base": "...", "rationale_bull": "...", "rationale_bear": "...", "monthly_forecast_base": [...], "monthly_forecast_bull": [...], "monthly_forecast_bear": [...] }},
     "aluminum": {{ ... }},
     "gold": {{ ... }},
     "silver": {{ ... }},
@@ -274,7 +289,7 @@ prompt = f"""
 }}
 """
 
-print("[진행] Gemini 3.6/2.5/1.5 다변량 시나리오 연산 수행 중...")
+print("[진행] Gemini 3.6/2.5/1.5 다변량 시계열 3대 시나리오 연산 수행 중...")
 
 # 다중 모델 폴백 및 지수 백오프 자동 재시도 시스템 구축 (503 UNAVAILABLE 완벽 대응)
 MAX_RETRIES = 5
@@ -284,7 +299,7 @@ last_exception = None
 success = False
 
 for model_name in MODELS_TO_TRY:
-  print(f"[진행] {model_name} 모델로 원자재 예측 시도 중...")
+  print(f"[진행] {model_name} 모델로 원자재 3대 시나리오 예측 시도 중...")
   for attempt in range(1, MAX_RETRIES + 1):
     try:
       response = client.models.generate_content(
@@ -332,7 +347,7 @@ try:
 
   print(
       f"[성공] raw_materials_forecast.json 생성 완료:"
-      f" {market_summary_for_ai['update_date']} (글로벌 실거래 10대 품목 및 월별 타임스넉 전망 탑재)"
+      f" {market_summary_for_ai['update_date']} (3대 시나리오 밴드 정밀 데이터 전수 이식 완수)"
   )
 
 except Exception as e:
