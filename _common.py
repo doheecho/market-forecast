@@ -26,10 +26,9 @@ META = {
     "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
     "steel": ("열연강판 (CME HRC)", "USD/s.ton", 1.0),  # 냉연 SPCC 아님 — 방향성 참고
     "ironore": ("철광석 62%Fe (CFR China)", "USD/dmt", 1.0),
-    # KOMIS 소스(선택) — komis.py 가 활성화되면 사용
-    "nickel": ("니켈 (KOMIS)", "USD/ton", 1.0),
-    "zinc": ("아연 (KOMIS)", "USD/ton", 1.0),
-    "tungsten": ("텅스텐 APT (KOMIS)", "USD/mtu", 1.0),
+    # 야후에 자유 시세가 없음 — seed_prices.py 로 수동 주입 시 대시보드에 자동 표시
+    "nickel": ("니켈 (LME)", "USD/ton", 1.0),
+    "zinc": ("아연 (LME)", "USD/ton", 1.0),
 }
 
 

@@ -23,14 +23,9 @@ jobs:
           python-version: "3.11"
           cache: pip
 
-      - run: pip install "yfinance>=0.2.40" "pandas>=2.0" "requests>=2.31"
+      - run: pip install "yfinance>=0.2.40" "pandas>=2.0"
 
       - run: python prices.py
-
-      - name: KOMIS (니켈·아연·텅스텐, 키 없으면 자동 skip)
-        env:
-          KOMIS_API_KEY: ${{ secrets.KOMIS_API_KEY }}
-        run: python komis.py || true
 
       - name: Commit prices
         run: |

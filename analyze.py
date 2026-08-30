@@ -47,7 +47,7 @@ history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# 다른 소스(KOMIS: 니켈·아연·텅스텐)가 이미 파일에 넣어둔 시세를 이어붙인다.
+# 야후에 없어 수동/외부로 채워둔 시세(니켈·아연 등, seed_prices.py)를 이어붙인다.
 try:
     _prev_hist = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
     for _k, _rows in _prev_hist.items():
@@ -165,9 +165,6 @@ FACTORS = {
     "zinc": "매크로: 글로벌 건설·인프라(아연도금 강재) 수요, 달러·중국 경기. "
             "마이크로: 광산 정광 공급(TC 제련수수료 방향), LME/SHFE 재고·캔슬드워런트, 주요 제련소 감산/정비, "
             "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
-    "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공 수요. "
-                "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
-                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
 }
 
 SCHEMA_ONE = """{

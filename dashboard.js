@@ -12,11 +12,11 @@ const JSON_RAW =
 const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
 
 const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum",
-  "steel", "ironore", "nickel", "zinc", "tungsten"];
+  "steel", "ironore", "nickel", "zinc"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
   gold: "금", silver: "은", platinum: "백금",
-  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
+  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연",
 };
 const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],

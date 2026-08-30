@@ -20,7 +20,7 @@ try:
 except Exception:  # noqa: BLE001
     doc = {}
 
-# 야후 외 소스(KOMIS: 니켈·아연·텅스텐)가 넣어둔 키는 덮어쓰지 않고 보존.
+# 야후에서 안 받는 키(니켈·아연 등, seed_prices.py 로 주입)는 덮어쓰지 않고 보존.
 prev_hist = doc.get("history_3y") or {}
 for k, rows in prev_hist.items():
     if k not in history and rows:
