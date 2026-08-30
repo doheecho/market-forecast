@@ -8,6 +8,9 @@ const JSON_LOCAL = "./raw_materials_forecast.json";
 const JSON_RAW =
   "https://raw.githubusercontent.com/doheecho/market-forecast/main/raw_materials_forecast.json";
 
+// 배포한 Cloudflare Worker 주소 (proxy/). 비우면 "AI 분석 갱신" 은 데이터 재조회만 함.
+const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
+
 const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
@@ -28,9 +31,59 @@ if (window.Chart) {
 }
 document.addEventListener("DOMContentLoaded", init);
 document.getElementById("refreshBtn").addEventListener("click", () => load(true));
+document.getElementById("rerunBtn").addEventListener("click", rerunAnalysis);
 
 async function init() {
   await load(false);
+}
+
+/* ---------- 토스트 ---------- */
+let _toastT = null;
+function toast(msg, ms = 2600) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(_toastT);
+  if (ms) _toastT = setTimeout(() => (el.hidden = true), ms);
+}
+
+/* ---------- AI 분석 갱신: GitHub Actions(run.yml) 트리거 후 반영 대기 ---------- */
+async function rerunAnalysis() {
+  const btn = document.getElementById("rerunBtn");
+  btn.disabled = true;
+  const before = state.data && state.data.update_date;
+  try {
+    if (PROXY_BASE) {
+      const r = await fetch(`${PROXY_BASE}/dispatch?wf=run`, { cache: "no-store" })
+        .then((x) => x.json())
+        .catch((e) => ({ error: String(e) }));
+      if (r && r.ok) {
+        toast("AI 분석 재생성 요청됨 · 1~3분 후 자동 반영", 4000);
+        for (let i = 0; i < 20; i++) {
+          await new Promise((s) => setTimeout(s, 12000));
+          try {
+            const d = await fetchFirst([JSON_LOCAL + "?t=" + Date.now(), JSON_RAW + "?t=" + Date.now()]);
+            if (d && d.update_date && JSON.stringify(d) !== JSON.stringify(state.data)) {
+              state.data = d;
+              document.getElementById("asOf").textContent = "기준일 " + d.update_date;
+              render();
+              toast("AI 분석 갱신 완료");
+              return;
+            }
+          } catch (_) {}
+        }
+        toast("아직 갱신 전입니다. 잠시 후 새로고침 해주세요.", 4000);
+        return;
+      }
+      toast("워크플로 트리거 실패 · 최신 데이터만 다시 불러옵니다");
+    } else {
+      toast("PROXY 미설정 · 최신 데이터만 다시 불러옵니다");
+    }
+    await load(true);
+    toast(state.data && state.data.update_date !== before ? "갱신됨" : "변경 없음");
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function load(bust) {
@@ -130,14 +183,15 @@ function render() {
       <div class="scroll-x" id="metrics"></div>
     </div>
 
-    <div class="block">
-      <h3>시나리오</h3>
-      <div class="grid-3" id="scenarios"></div>
-    </div>
-
-    <div class="block" id="analogBlock" hidden>
-      <h3>과거 유사 국면</h3>
-      <div class="grid-2" id="analogs"></div>
+    <div class="two-col">
+      <div class="block" id="analogBlock">
+        <h3>과거 유사 국면</h3>
+        <div id="analogs"></div>
+      </div>
+      <div class="block">
+        <h3>시나리오</h3>
+        <div id="scenarios"></div>
+      </div>
     </div>
 
     <div class="block">
@@ -304,11 +358,12 @@ function renderScenarios(f) {
 
 /* ---------- 과거 유사 국면 ---------- */
 function renderAnalogs(f, sign) {
-  const block = document.getElementById("analogBlock");
   const box = document.getElementById("analogs");
   const list = f.analogs || [];
-  if (!list.length) { block.hidden = true; return; }
-  block.hidden = false;
+  if (!list.length) {
+    box.innerHTML = "<p class='src'>유사 국면 데이터 없음 (AI 분석 갱신 후 표시)</p>";
+    return;
+  }
   box.innerHTML = list
     .map(
       (a, i) => `<div class="analog">

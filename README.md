@@ -40,6 +40,24 @@ git push
 2. **Settings → Pages → Build and deployment → Source = `GitHub Actions`**
 3. 접속: `https://doheecho.github.io/market-forecast/`
 
+## (선택) "AI 분석 갱신" 버튼 — 메-Stock 방식
+
+대시보드 상단 **↻ AI 분석 갱신** 버튼이 GitHub Actions(`run.yml`)를 바로 실행하게 하려면
+`proxy/` 의 Cloudflare Worker 를 배포합니다.
+
+```bat
+cd C:\조도희\원자재시황\proxy
+wrangler deploy
+wrangler secret put GH_DISPATCH_TOKEN   REM fine-grained PAT · 이 리포 · Actions: Read and write
+```
+
+- 배포 URL(`https://market-forecast-proxy.<sub>.workers.dev`)을 `dashboard.js` 상단 `PROXY_BASE` 에 넣고 push.
+- `GH_REPO` 는 `wrangler.toml [vars]` 에 이미 있음 → **토큰만** 넣으면 됨.
+- `PROXY_BASE` 가 비어 있으면 버튼은 데이터 재조회만 합니다.
+
+과거 유사국면은 `analyze.py` 가 실거래 시계열에서 현재 12개월과 상관이 가장 높은
+과거 구간을 찾아 실제 가격을 넣고, Gemini 는 그 위에 사건명·요약만 붙입니다.
+
 ## 로컬 실행 / 확인
 
 ```bat

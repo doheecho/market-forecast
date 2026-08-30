@@ -1,0 +1,13 @@
+name = "market-forecast-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# 배포:  cd proxy && wrangler deploy
+#
+# GH_REPO 는 비밀이 아니므로 평문. worker.js 기본값도 동일 → 토큰만 넣으면 동작.
+[vars]
+GH_REPO = "doheecho/market-forecast"
+
+# GH_DISPATCH_TOKEN 은 비밀 → 파일에 넣지 말고:
+#   wrangler secret put GH_DISPATCH_TOKEN
+# fine-grained PAT · 이 리포 선택 · Repository permissions > Actions: Read and write

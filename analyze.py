@@ -105,6 +105,46 @@ for k, rows in history.items():
     history_brief[k] = rows[::step]
 
 
+def best_analog(key: str) -> dict | None:
+    """현재 12개월 궤적과 월간수익률 상관이 가장 높은 과거 12개월 구간을 실데이터에서 탐색.
+    그 구간의 실제 가격 12개 + 이후 6개월 실제 가격 6개를 그대로 반환(AI 가 서술만 붙임)."""
+    s = raw.get(key)
+    if s is None or s.empty:
+        return None
+    m = s.resample("ME").last().dropna()
+    if len(m) < 12 + 6 + 12:
+        return None
+    mult = META[key][2]
+    cur_ret = m.iloc[-12:].pct_change().dropna().values
+    best = None
+    for i in range(len(m) - 12 - 6):
+        win = m.iloc[i:i + 12]
+        if win.index[-1] >= m.index[-12]:      # 현재 구간과 겹치면 중단
+            break
+        r = win.pct_change().dropna().values
+        if len(r) != len(cur_ret):
+            continue
+        c = float(pd.Series(r).corr(pd.Series(cur_ret)))
+        if c == c and (best is None or c > best[0]):
+            best = (c, win, m.iloc[i + 12:i + 18])
+    if not best or best[0] < 0.3:
+        return None
+    c, win, after = best
+    hist_p = [round(float(v) * mult, 2) for v in win.values]
+    fore_p = [round(float(v) * mult, 2) for v in after.values]
+    chg = (fore_p[-1] / hist_p[-1] - 1) * 100 if hist_p and hist_p[-1] else 0.0
+    return {
+        "period": f"'{win.index[0].strftime('%y.%m')}~'{win.index[-1].strftime('%y.%m')}",
+        "similarity": f"{max(0.0, c) * 100:.0f}%",
+        "actual": f"{chg:+.1f}%",
+        "miniHist": hist_p,
+        "miniForecast": fore_p,
+    }
+
+
+analogs_real = {k: best_analog(k) for k in COMMODITIES}
+
+
 def last_val(name: str, default: float) -> float:
     s = raw.get(name)
     return round(float(s.iloc[-1]), 4) if s is not None and not s.empty else default
@@ -145,9 +185,10 @@ SCHEMA_ONE = """{
   "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0} ],
   "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
-  "analogs": [ {"period": "'20.11~'21.10", "similarity": "92%", "acc": "92%", "forecast": "+14.9%", "actual": "+3.8%",
-    "title": "역사적 사건 정성 제목", "summary": "국면 요약",
-    "miniHist": [12개 월 과거 가격], "miniForecast": [이후 6개 월 실제 가격]} ]
+  "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "acc": "0%", "forecast": "+0.0%",
+    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ]
 }"""
 
 prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
@@ -159,9 +200,14 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 중요한 것 위주로 4~5개 선정하고
   label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.
-- analogs 1~2개. miniHist 12개, miniForecast 6개 숫자.
+- analogs 는 각 원자재당 1개. period/similarity/actual/miniHist/miniForecast 는
+  아래 '실제 과거 유사국면' 값을 그대로 복사하세요(임의 생성 금지).
+  title(그 시기 실제 사건명)·summary·acc·forecast(당신의 현재 6개월 base 전망 변화율)만 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
+
+[실제 과거 유사국면 (실거래 데이터에서 상관분석으로 탐색됨)]
+{json.dumps(analogs_real, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
 {chr(10).join(f"- {k}: {v}" for k, v in FACTORS.items())}

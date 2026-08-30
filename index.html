@@ -152,6 +152,18 @@
     .loading, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
     .error { color: var(--up); }
     .src { color: var(--muted); font-size: 11px; margin-top: 8px; }
+
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+    #scenarios { display: flex; flex-direction: column; gap: 12px; }
+    #analogs { display: flex; flex-direction: column; gap: 12px; }
+
+    .toast {
+      position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--accent);
+      border-radius: 999px; padding: 9px 18px; font-size: 13px; z-index: 60;
+      box-shadow: 0 6px 20px rgba(0,0,0,.4);
+    }
   </style>
 </head>
 <body>
@@ -160,8 +172,10 @@
     <div class="meta">
       <span id="asOf">데이터 로딩 중…</span>
       <button id="refreshBtn" type="button" title="데이터 다시 불러오기">↻ 새로고침</button>
+      <button id="rerunBtn" type="button" title="AI 분석을 다시 생성 (GitHub Actions)">↻ AI 분석 갱신</button>
     </div>
   </header>
+  <div id="toast" class="toast" hidden></div>
 
   <div class="wrap">
     <nav class="tabs" id="tabs"></nav>
