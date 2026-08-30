@@ -84,8 +84,13 @@
       background: color-mix(in srgb, var(--amber) 10%, var(--panel));
       border: 1px solid var(--line); border-left: 4px solid var(--amber);
       border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;
-      color: var(--amber); font-weight: 600; white-space: pre-line;
+      color: var(--amber); font-weight: 500; white-space: pre-line; line-height: 1.55;
     }
+    .advisor .advisor-tag {
+      display: inline-block; font-weight: 700; letter-spacing: .3px;
+      margin-right: 6px;
+    }
+    .advisor .advisor-tag::after { content: " :"; }
 
     .ctl-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
     .ctl-lbl { color: var(--muted); font-size: 11px; margin-right: 4px; }
@@ -100,7 +105,7 @@
     }
 
     .chart-box { position: relative; height: 340px; width: 100%; }
-    .mini-box { position: relative; height: 110px; width: 100%; }
+    .mini-box { position: relative; height: 150px; width: 100%; margin: 4px 0 8px; }
 
     .scroll-x { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
     .metric {

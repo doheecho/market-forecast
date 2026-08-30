@@ -94,8 +94,9 @@ function render() {
   const sign = currencySign(f.unit);
   const rateUp = !String(f.forecast_change_rate || "").trim().startsWith("-");
 
+  const advisorText = stripAdvisorPrefix(f.advisor || f.planning_advisor || "");
   document.getElementById("app").innerHTML = `
-    ${f.planning_advisor ? `<div class="advisor">${escapeHtml(stripAdvisorPrefix(f.planning_advisor))}</div>` : ""}
+    ${advisorText ? `<div class="advisor"><span class="advisor-tag">AI Advisor</span>\n${escapeHtml(advisorText)}</div>` : ""}
 
     <div class="cards">
       <div class="card">
@@ -104,7 +105,7 @@ function render() {
         <div class="sub">${escapeHtml(f.unit || "")}</div>
       </div>
       <div class="card">
-        <div class="label">6개월 후 AI 목표가</div>
+        <div class="label">6개월 후 AI 가격전망</div>
         <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(f.forecast_6m_target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(f.forecast_change_rate || "")}</span></div>
         <div class="sub">기준 시나리오 (Base)</div>
       </div>
@@ -122,11 +123,10 @@ function render() {
         ${RANGES.map(([lbl, m]) => `<button data-m="${m}"${m === state.months ? ' class="on"' : ""}>${rangeText(lbl)}</button>`).join("")}
       </div>
       <div class="chart-box"><canvas id="mainChart"></canvas></div>
-      <div class="src">실적(음영) · Base(굵은 선) · Bull/Bear(점선, 구름). 세로 점선 = 현재.</div>
     </div>
 
     <div class="block">
-      <h3>요인지표 (Rationale)</h3>
+      <h3>요인지표</h3>
       <div class="scroll-x" id="metrics"></div>
     </div>
 
@@ -171,6 +171,7 @@ function historyRows(key) {
 }
 
 function drawMainChart() {
+  if (state.charts.main) { try { state.charts.main.destroy(); } catch (_) {} state.charts.main = null; }
   const f = state.data.forecast_data[state.key];
   const sign = currencySign(f.unit);
   let hist = historyRows(state.key);
@@ -326,32 +327,61 @@ function renderAnalogs(f, sign) {
     )
     .join("");
 
-  list.forEach((a, i) => drawMini(i, a));
+  const curMonthly = monthlyCloses(historyRows(state.key));
+  const curBase = (f.monthly_forecast_base || []).map((r) => Number(r.price)).filter(Number.isFinite);
+  list.forEach((a, i) => drawMini(i, a, curMonthly, curBase));
 }
 
-function drawMini(i, a) {
-  const hist = (a.miniHist || []).map(Number);
-  const fore = (a.miniForecast || []).map(Number);
-  if (!hist.length) return;
-  const n = hist.length;
-  const labels = [];
-  for (let k = 0; k < n + fore.length; k++) labels.push(k - n + 1);
+/* 일/주봉 시계열 → 월별 마지막 종가 배열 */
+function monthlyCloses(rows) {
+  const m = new Map();
+  for (const r of rows || []) if (r && r.date) m.set(String(r.date).slice(0, 7), r.price);
+  return [...m.values()].map(Number).filter(Number.isFinite);
+}
 
-  const histLine = hist.concat(Array(fore.length).fill(null));
-  const foreLine = Array(n - 1).fill(null).concat([hist[n - 1]], fore);
+/* 과거 유사국면과 현재를 같은 평면에 정규화(첫 값=100)해서 겹쳐 본다.
+   - 과거 실적(하늘색) / 과거 이후 실제(초록 점선)
+   - 현재 실적(자홍) / 현재 전망(보라 점선)  ← 과거와 같은 구간 길이로 정렬 */
+function drawMini(i, a, curMonthly, curBase) {
+  const pastH = (a.miniHist || []).map(Number).filter(Number.isFinite);
+  const pastF = (a.miniForecast || []).map(Number).filter(Number.isFinite);
+  if (pastH.length < 2) return;
+  const H = pastH.length;                 // 과거 실적 개월수 (보통 12)
+  const F = pastF.length || curBase.length; // 이후 개월수 (보통 6)
+  const rebase = (arr, b) => arr.map((v) => (b ? (v / b) * 100 : null));
+
+  const pastHistN = rebase(pastH, pastH[0]);
+  const pastForeN = Array(H - 1).fill(null).concat([pastHistN[H - 1]], rebase(pastF, pastH[0]));
+
+  const curH = (curMonthly || []).slice(-H);
+  const curF = (curBase || []).slice(0, F);
+  let curHistN = [], curForeN = [];
+  if (curH.length >= 2) {
+    const b = curH[0];
+    curHistN = Array(H - curH.length).fill(null).concat(rebase(curH, b));
+    curForeN = Array(H - 1).fill(null).concat([curHistN[H - 1]], rebase(curF, b));
+  }
+
+  const labels = [];
+  for (let k = 0; k < H + F; k++) labels.push(k < H ? `${k - H + 1}` : `+${k - H + 1}`);
 
   state.charts["mini" + i] = new Chart(document.getElementById("mini" + i), {
     type: "line",
     data: {
       labels,
       datasets: [
-        { label: "과거 실적", data: histLine, borderColor: "#22d3ee", borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
-        { label: "이후 실제", data: foreLine, borderColor: "#22c55e", borderWidth: 1.5, borderDash: [3, 3], pointRadius: 0, tension: 0.3 },
+        { label: "과거 실적", data: pastHistN, borderColor: "#22d3ee", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+        { label: "과거 이후 실제", data: pastForeN, borderColor: "#22c55e", borderWidth: 1.6, borderDash: [4, 3], pointRadius: 0, tension: 0.3 },
+        { label: "현재 실적", data: curHistN, borderColor: "#e879f9", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+        { label: "현재 전망", data: curForeN, borderColor: "#a855f7", borderWidth: 1.6, borderDash: [4, 3], pointRadius: 0, tension: 0.3 },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      plugins: {
+        legend: { display: true, position: "bottom", labels: { boxWidth: 8, font: { size: 9 }, padding: 6 } },
+        tooltip: { enabled: false },
+      },
       scales: { x: { display: false }, y: { display: false } },
     },
   });

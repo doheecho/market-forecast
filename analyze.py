@@ -119,10 +119,27 @@ macro = {
 }
 market_input = {"update_date": update_date, "macro": macro, "history_summary": history_brief}
 
+# 원자재별 주요 영향 요인 — metrics 선정 가이드로 프롬프트에 주입
+FACTORS = {
+    "wti": "매크로: 달러인덱스(DXY), 글로벌 제조업 PMI, 美 연준 금리·인플레이션 추이. "
+           "마이크로: EIA 주간 원유재고, OPEC+ 감산/증산량, 쿠싱 재고, 중동·러시아 지정학 리스크·공급차질",
+    "copper": "매크로: 중국 부동산·인프라 부양책, 글로벌 경기침체 우려·금리 환경. "
+              "마이크로: LME/COMEX/SHFE 재고, 칠레·페루 광산 생산차질(파업·노후화), EV·AI 데이터센터·전력망 실수요",
+    "aluminum": "매크로: 글로벌 전력·에너지 가격(천연가스·석탄 제련원가 연동), 중국 탄소중립·생산쿼터. "
+                "마이크로: LME 재고·워런트 취소물량 비율, 알루미나 정련소 가동률, 자동차·포장재·건설 전방수요",
+    "gold": "매크로: 美 실질금리(TIPS, 반비례), 달러 방향성, 글로벌 인플레·스태그플레이션. "
+            "마이크로: 중앙은행(신흥국) 금 매입 규모, 안전자산 선호(지정학·금융위기), 골드바·ETF 자금흐름",
+    "silver": "매크로: 금 동조화(Gold-Silver Ratio), 美 성장률·인플레 기대치. "
+              "마이크로: 태양광·전자기기 산업용 수요 비중, 부산물 생산특성(구리·연·아연), 은 ETF·실물수요",
+    "platinum": "매크로: 글로벌 자동차 업황, 내연기관→하이브리드→EV 전환속도. "
+                "마이크로: 남아공 광산 파업·전력난, 디젤 촉매변환기 수요, 수소경제(연료전지) 장기수요",
+}
+
 SCHEMA_ONE = """{
   "name": "WTI 원유 (CME)", "unit": "USD/bbl",
   "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
   "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
+  "advisor": "원자재 구매 담당자를 위한 3~4문장. 최근 시황 / 관련 글로벌 정세 / 알아야 할 주요 뉴스 / 대응 조언 순서로 서술.",
   "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 가격 산정 근거 한 문장"} ],
   "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0} ],
   "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0} ],
@@ -140,8 +157,14 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 규칙:
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
-- metrics 3~5개, analogs 1~2개. miniHist 12개, miniForecast 6개 숫자.
+- metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 중요한 것 위주로 4~5개 선정하고
+  label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.
+- analogs 1~2개. miniHist 12개, miniForecast 6개 숫자.
+- advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
+
+[원자재별 주요 영향 요인]
+{chr(10).join(f"- {k}: {v}" for k, v in FACTORS.items())}
 
 [시장 입력 데이터]
 {json.dumps(market_input, ensure_ascii=False)}
