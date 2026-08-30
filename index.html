@@ -33,10 +33,16 @@
     }
     a { color: var(--accent); }
 
+    /* 상단바 + 탭 + AI Advisor 를 한 덩어리로 고정 (엑셀 틀고정) — 내부 간격/위치 그대로 */
+    .sticky-head {
+      position: sticky; top: 0; z-index: 40;
+      background: var(--bg); border-bottom: 1px solid var(--line);
+    }
+    .sticky-head .wrap { padding-top: 0; padding-bottom: 14px; }
+
     .topbar {
       display: flex; align-items: baseline; justify-content: space-between;
       flex-wrap: wrap; gap: 8px; padding: 10px 20px; border-bottom: 1px solid var(--line);
-      position: sticky; top: 0; z-index: 40; background: var(--bg);
     }
     .topbar h1 { font-size: 17px; margin: 0; }
     .topbar .sub { color: var(--amber); font-weight: 700; font-size: 17px; margin-left: 8px; }
@@ -49,11 +55,9 @@
 
     .wrap { padding: 16px 20px 48px; max-width: 1180px; margin: 0 auto; }
 
-    /* 상단 고정 영역: 탭 + AI Advisor 까지 (엑셀 틀고정) */
     .tabs {
-      display: flex; gap: 6px; margin: 4px 0 16px; flex-wrap: wrap;
+      display: flex; gap: 6px; margin: 12px 0 12px; flex-wrap: wrap;
       border-bottom: 1px solid var(--line);
-      position: sticky; top: 44px; z-index: 30; background: var(--bg);
     }
     .tabs button {
       background: transparent; border: none; border-bottom: 2px solid transparent;
@@ -97,11 +101,11 @@
     .advisor {
       background: color-mix(in srgb, var(--amber) 14%, var(--panel));
       border: 1px solid var(--line); border-left: 4px solid var(--amber);
-      border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;
+      border-radius: 8px; padding: 12px 16px; margin: 0;
       color: var(--amber); font-weight: 500; white-space: pre-line; line-height: 1.5;
-      position: sticky; top: 88px; z-index: 20;
-      max-height: 24vh; overflow-y: auto;
+      max-height: 22vh; overflow-y: auto;
     }
+    .advisor[hidden] { display: none; }
     .advisor .advisor-tag {
       display: inline-block; font-weight: 700; letter-spacing: .3px;
       margin-right: 6px;
@@ -202,18 +206,23 @@
   </style>
 </head>
 <body>
-  <header class="topbar">
-    <h1>원자재 시황 <span class="sub">6대 핵심 원자재 AI 가격 전망</span></h1>
-    <div class="meta">
-      <span id="asOf">데이터 로딩 중…</span>
-      <button id="refreshBtn" type="button" title="서버의 최신 데이터 파일을 다시 받아옵니다 (워크플로 실행 X)">↻ 새로고침</button>
-      <button id="rerunBtn" type="button" title="AI 전망을 지금 새로 생성 (GitHub Actions 실행)">↻ AI 분석 갱신</button>
+  <div class="sticky-head">
+    <header class="topbar">
+      <h1>원자재 시황 <span class="sub">6대 핵심 원자재 AI 가격 전망</span></h1>
+      <div class="meta">
+        <span id="asOf">데이터 로딩 중…</span>
+        <button id="refreshBtn" type="button" title="서버의 최신 데이터 파일을 다시 받아옵니다 (워크플로 실행 X)">↻ 새로고침</button>
+        <button id="rerunBtn" type="button" title="AI 전망을 지금 새로 생성 (GitHub Actions 실행)">↻ AI 분석 갱신</button>
+      </div>
+    </header>
+    <div class="wrap">
+      <nav class="tabs" id="tabs"></nav>
+      <div id="advisor" class="advisor" hidden></div>
     </div>
-  </header>
+  </div>
   <div id="toast" class="toast" hidden></div>
 
   <div class="wrap">
-    <nav class="tabs" id="tabs"></nav>
     <div id="app"><div class="loading">데이터 로딩 중…</div></div>
   </div>
 

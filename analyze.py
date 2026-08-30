@@ -54,9 +54,13 @@ for k, rows in history.items():
     history_brief[k] = rows[::step]
 
 
-def top_analogs(key: str, n: int = 2) -> list[dict]:
-    """현재 12개월 궤적과 월간수익률 상관이 높은 과거 구간 상위 n개(겹치지 않게)를
-    실데이터에서 탐색. 각 구간의 실제 가격 12개 + 이후 6개월 실제 6개를 그대로 반환."""
+_SIM_MIN = 0.5   # 이 상관 이상만 '유사국면'으로 채택 (없으면 0개, 많으면 여러 개)
+_MAX_ANALOGS = 6  # 프롬프트·JSON 폭주 방지용 안전 상한
+
+
+def top_analogs(key: str, sim_min: float = _SIM_MIN) -> list[dict]:
+    """현재 12개월 궤적과 월간수익률 상관이 sim_min 이상인 과거 구간을 전부(겹치지 않게)
+    유사도 내림차순으로 반환. 각 구간의 실제 가격 12개 + 이후 6개월 실제 6개를 그대로."""
     s = raw.get(key)
     if s is None or s.empty:
         return []
@@ -75,7 +79,7 @@ def top_analogs(key: str, n: int = 2) -> list[dict]:
         if len(r) != len(cur_ret):
             continue
         c = float(pd.Series(r).corr(pd.Series(cur_ret)))
-        if c == c and c >= 0.3:
+        if c == c and c >= sim_min:
             cands.append((c, i, win, m.iloc[i + 12:i + 18]))
     cands.sort(key=lambda x: -x[0])
 
@@ -94,12 +98,12 @@ def top_analogs(key: str, n: int = 2) -> list[dict]:
             "miniHist": hist_p,
             "miniForecast": fore_p,
         })
-        if len(out) >= n:
+        if len(out) >= _MAX_ANALOGS:
             break
     return out
 
 
-analogs_real = {k: top_analogs(k, 2) for k in COMMODITIES}
+analogs_real = {k: top_analogs(k) for k in COMMODITIES}
 
 
 update_date = today_str()

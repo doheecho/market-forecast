@@ -173,10 +173,18 @@ function render() {
   const rateStr = rate == null ? (f.forecast_change_rate || "") : `${rate > 0 ? "+" : ""}${rate.toFixed(1)}%`;
   const rateUp = rate == null ? !String(f.forecast_change_rate || "").startsWith("-") : rate >= 0;
 
+  // AI Advisor 는 상단 고정 영역(#advisor)에 별도로 렌더 (스크롤해도 위치 그대로)
   const advisorText = stripAdvisorPrefix(f.advisor || f.planning_advisor || "").replace(/\s*\n\s*/g, " ").trim();
-  document.getElementById("app").innerHTML = `
-    ${advisorText ? `<div class="advisor"><span class="advisor-tag">AI Advisor</span> ${escapeHtml(advisorText)}</div>` : ""}
+  const advEl = document.getElementById("advisor");
+  if (advisorText) {
+    advEl.innerHTML = `<span class="advisor-tag">AI Advisor</span> ${escapeHtml(advisorText)}`;
+    advEl.hidden = false;
+  } else {
+    advEl.innerHTML = "";
+    advEl.hidden = true;
+  }
 
+  document.getElementById("app").innerHTML = `
     <div class="cards">
       <div class="card">
         <div class="label">현재가</div>
