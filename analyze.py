@@ -255,14 +255,13 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
   원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
   가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
-- WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 커버류 (레진 소재), PE Foam/Pad 같은 포장재/비닐류의 영향이 큼
-- 구리의 경우 Cable, Heatsink 등에 영향
+- WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류의 영향이 큼
+- 구리의 경우 Cable, Heatsink, Bracket 가격에 영향
 - 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
 - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
 - 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
-- 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의
-  상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
-- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t,
+- 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
+- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum·silver USD/oz.t,
   steel USD/s.ton, ironore USD/dmt.
 
 [실제 과거 유사국면 (1년) — 실거래 가격궤적 유사도 분석]

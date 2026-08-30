@@ -27,7 +27,7 @@ META = {
     "copper": ("전기동 (LME)", "USD/ton", 2204.62),   # HG=F: USD/lb → USD/ton
     "aluminum": ("알루미늄 (LME)", "USD/ton", 1.0),
     "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
-    "silver": ("은 (LBMA)", "US￠/oz.t", 100.0),        # SI=F: USD/oz → US¢/oz
+    "silver": ("은 (LBMA)", "USD/oz.t", 1.0),          # SI=F: USD/oz (금·백금과 동일 단위)
     "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
     "steel": ("열연강판 (CME HRC)", "USD/s.ton", 1.0),  # 냉연 SPCC 아님 — 방향성 참고
     "ironore": ("철광석 62%Fe (CFR China)", "USD/dmt", 1.0),
