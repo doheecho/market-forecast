@@ -659,7 +659,7 @@ function renderScenarioTable(f, sign) {
   body.innerHTML = base
     .map(
       (b, i) => `<tr>
-        <td class="col-month"><span class="badge secondary">${escapeHtml(fmtYm(b.month))}</span></td>
+        <td class="col-month">${escapeHtml(fmtYm(b.month))}</td>
         ${cell(b, "base")}
         ${cell(bull[i], "bull")}
         ${cell(bear[i], "bear")}
