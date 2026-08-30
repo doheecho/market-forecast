@@ -277,32 +277,36 @@ function drawMainChart() {
     hist = hist.filter((r) => new Date(r.date).getTime() >= cut);
   }
 
-  const histPts = hist.map((r) => ({ x: r.date, y: r.price }));
-  const anchor = histPts.length ? histPts[histPts.length - 1] : null;
-
-  // 전망 라인은 첫 전망월부터. 마지막 실적일에는 Base/Bull/Bear 점을 찍지 않는다.
   const fc = (arr) => (arr || []).map((r) => ({ x: r.month + "-15", y: r.price }));
   const base = fc(f.monthly_forecast_base);
   const bull = fc(f.monthly_forecast_bull);
   const bear = fc(f.monthly_forecast_bear);
 
+  // 실적: 마지막 실적일까지. 전망월 x 에는 명시적 null 을 채워 툴팁에서 "실적" 이 안 뜨게.
+  const anchor = hist.length ? { x: hist[hist.length - 1].date, y: hist[hist.length - 1].price } : null;
+  const histPts = hist.map((r) => ({ x: r.date, y: r.price }));
+  for (const p of base) histPts.push({ x: p.x, y: null });
+
+  // 전망 라인: 마지막 실적점(anchor)에서 시작해 첫 전망월로 이어짐 (그래프 연결)
+  const lead = anchor ? [anchor] : [];
+
   const ds = [
     {
       label: "실적", data: histPts, borderColor: "#22d3ee",
       backgroundColor: "rgba(34,211,238,0.08)", borderWidth: 1.6,
-      pointRadius: 0, fill: true, tension: 0.25, order: 5,
+      pointRadius: 0, fill: true, tension: 0.25, order: 5, spanGaps: false,
     },
     {
-      label: "Bull", data: bull, borderColor: "#ef4444",
+      label: "Bull", data: lead.concat(bull), borderColor: "#ef4444",
       borderWidth: 1.4, borderDash: [4, 3], pointRadius: 0, fill: false, tension: 0.3, order: 3,
     },
     {
-      label: "Bear", data: bear, borderColor: "#3b82f6",
+      label: "Bear", data: lead.concat(bear), borderColor: "#3b82f6",
       backgroundColor: "rgba(99,110,140,0.10)", borderWidth: 1.4, borderDash: [4, 3],
       pointRadius: 0, fill: "-1", tension: 0.3, order: 3,
     },
     {
-      label: "Base", data: base, borderColor: "#f59e0b",
+      label: "Base", data: lead.concat(base), borderColor: "#f59e0b",
       borderWidth: 2.6, pointRadius: 0, fill: false, tension: 0.3, order: 1,
     },
   ];
@@ -317,6 +321,7 @@ function drawMainChart() {
       plugins: {
         legend: { labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
+          filter: (it) => it.parsed && it.parsed.y != null,
           callbacks: {
             label: (c) => `${c.dataset.label}: ${sign}${fmtNum(c.parsed.y)}`,
           },
