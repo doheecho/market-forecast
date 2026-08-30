@@ -153,11 +153,12 @@ function render() {
   const sign = currencySign(f.unit);
 
   // 현재가·전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
-  const hist = despike(historyRows(state.key));
+  const hist = historyRows(state.key); // 이미 despike 됨
   const base = f.monthly_forecast_base || [];
   const spot =
     hist.length ? hist[hist.length - 1].price
     : Number(f.current_price) || null;
+  state._spot = spot; // 메인 차트가 마지막 실적점을 이 값으로 맞춤
   const target = base.length ? Number(base[base.length - 1].price) : Number(f.forecast_6m_target);
   const rate = spot && target ? (target / spot - 1) * 100 : null;
   const rateStr = rate == null ? (f.forecast_change_rate || "") : `${rate > 0 ? "+" : ""}${rate.toFixed(1)}%`;
@@ -254,13 +255,16 @@ function historyRows(key) {
   return despike((d.history_3y || d.history || {})[key] || []);
 }
 
-/* 시계열 꼬리에 튄 값(야후 마지막 봉 오류 등) 잘라냄: 직전값 대비 ±18% 초과면 제거 */
+/* 시계열 꼬리에 튄 값(야후 마지막 봉 오류 등) 잘라냄:
+   직전 8개 중앙값 대비 ±12% 초과면 꼬리에서 제거 */
 function despike(rows) {
-  if (!Array.isArray(rows) || rows.length < 5) return rows || [];
+  if (!Array.isArray(rows) || rows.length < 10) return rows || [];
   let end = rows.length;
-  while (end > 4) {
-    const a = Number(rows[end - 1].price), b = Number(rows[end - 2].price);
-    if (b && Math.abs(a / b - 1) > 0.18) end--;
+  while (end > 9) {
+    const ref = rows.slice(end - 9, end - 1).map((r) => Number(r.price)).filter(Number.isFinite).sort((x, y) => x - y);
+    const med = ref[Math.floor(ref.length / 2)];
+    const a = Number(rows[end - 1].price);
+    if (med && Number.isFinite(a) && Math.abs(a / med - 1) > 0.12) end--;
     else break;
   }
   return end === rows.length ? rows : rows.slice(0, end);
@@ -276,40 +280,44 @@ function drawMainChart() {
     const cut = last - state.months * 30.4 * 864e5;
     hist = hist.filter((r) => new Date(r.date).getTime() >= cut);
   }
+  if (!hist.length) return;
 
-  const fc = (arr) => (arr || []).map((r) => ({ x: r.month + "-15", y: r.price }));
-  const base = fc(f.monthly_forecast_base);
-  const bull = fc(f.monthly_forecast_bull);
-  const bear = fc(f.monthly_forecast_bear);
+  // 마지막 실적점 = 상단 KPI 현재가(state._spot)와 동일하게 강제
+  const spot = state._spot != null ? state._spot : hist[hist.length - 1].price;
+  const anchorX = hist[hist.length - 1].date;
+  const fcX = (f.monthly_forecast_base || []).map((r) => r.month + "-15");
 
-  // 실적: 마지막 실적일까지. 전망월 x 에는 명시적 null 을 채워 툴팁에서 "실적" 이 안 뜨게.
-  const anchor = hist.length ? { x: hist[hist.length - 1].date, y: hist[hist.length - 1].price } : null;
-  const histPts = hist.map((r) => ({ x: r.date, y: r.price }));
-  for (const p of base) histPts.push({ x: p.x, y: null });
+  // 4개 데이터셋 모두 같은 x 격자(실적일들 + 전망월들). 겹치지 않는 구간은 null → 툴팁에서 제외.
+  const pT = (r, i, isLast) => ({ x: r.date, y: isLast ? spot : r.price });
+  const histData = hist
+    .map((r, i) => pT(r, i, i === hist.length - 1))
+    .concat(fcX.map((x) => ({ x, y: null })));
 
-  // 전망 라인: 마지막 실적점(anchor)에서 시작해 첫 전망월로 이어짐 (그래프 연결)
-  const lead = anchor ? [anchor] : [];
+  const line = (arr) =>
+    hist.map((r, i) => ({ x: r.date, y: i === hist.length - 1 ? spot : null }))
+      .concat((arr || []).map((r, i) => ({ x: fcX[i], y: r.price })));
 
   const ds = [
     {
-      label: "실적", data: histPts, borderColor: "#22d3ee",
+      label: "실적", data: histData, borderColor: "#22d3ee",
       backgroundColor: "rgba(34,211,238,0.08)", borderWidth: 1.6,
       pointRadius: 0, fill: true, tension: 0.25, order: 5, spanGaps: false,
     },
     {
-      label: "Bull", data: lead.concat(bull), borderColor: "#ef4444",
+      label: "Bull", data: line(f.monthly_forecast_bull), borderColor: "#ef4444",
       borderWidth: 1.4, borderDash: [4, 3], pointRadius: 0, fill: false, tension: 0.3, order: 3,
     },
     {
-      label: "Bear", data: lead.concat(bear), borderColor: "#3b82f6",
+      label: "Bear", data: line(f.monthly_forecast_bear), borderColor: "#3b82f6",
       backgroundColor: "rgba(99,110,140,0.10)", borderWidth: 1.4, borderDash: [4, 3],
       pointRadius: 0, fill: "-1", tension: 0.3, order: 3,
     },
     {
-      label: "Base", data: lead.concat(base), borderColor: "#f59e0b",
+      label: "Base", data: line(f.monthly_forecast_base), borderColor: "#f59e0b",
       borderWidth: 2.6, pointRadius: 0, fill: false, tension: 0.3, order: 1,
     },
   ];
+  const anchor = { x: anchorX, y: spot };
 
   state.charts.main = new Chart(document.getElementById("mainChart"), {
     type: "line",
@@ -321,7 +329,7 @@ function drawMainChart() {
       plugins: {
         legend: { labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
-          filter: (it) => it.parsed && it.parsed.y != null,
+          filter: (it) => it.parsed && Number.isFinite(it.parsed.y),
           callbacks: {
             label: (c) => `${c.dataset.label}: ${sign}${fmtNum(c.parsed.y)}`,
           },
