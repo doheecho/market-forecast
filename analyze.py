@@ -11,7 +11,7 @@ import json
 import os
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
@@ -57,26 +57,28 @@ META = {
 }
 
 
-def fetch_series(ticker: str) -> pd.Series:
-    """최근 3년은 일봉, 그 이전 7년은 주봉으로 이어붙인 종가 시계열."""
-    today = datetime.now()
-    d3 = today - timedelta(days=3 * 365)
-    d10 = today - timedelta(days=10 * 365)
+print("[진행] 야후 파이낸스 시계열 수집 중… (10개 티커 일괄)")
+# 개별 yf.Ticker().history() 를 티커마다 부르면 Actions IP 에서 스로틀링으로 매우 느림.
+# yf.download 한 번으로 10개 티커를 병렬 수집한다.
+_dl = yf.download(
+    list(TICKERS.values()),
+    period="10y", interval="1d",
+    auto_adjust=True, progress=False, threads=True, group_by="column",
+)
+try:
+    _close = _dl["Close"]
+except Exception:  # noqa: BLE001
+    _close = _dl
+raw: dict[str, pd.Series] = {}
+for name, tk in TICKERS.items():
     try:
-        tk = yf.Ticker(ticker)
-        daily = tk.history(start=d3, end=today, interval="1d", auto_adjust=True)["Close"]
-        weekly = tk.history(start=d10, end=d3, interval="1wk", auto_adjust=True)["Close"]
-        s = pd.concat([weekly, daily]).sort_index()
-        s = s[~s.index.duplicated(keep="last")].dropna()
-        s.index = s.index.tz_localize(None)
-        return s
+        s = _close[tk].dropna()
+        if getattr(s.index, "tz", None) is not None:
+            s.index = s.index.tz_localize(None)
+        raw[name] = s
     except Exception as e:  # noqa: BLE001
-        print(f"[경고] {ticker} 수집 실패: {e}")
-        return pd.Series(dtype=float)
-
-
-print("[진행] 야후 파이낸스 시계열 수집 중…")
-raw = {name: fetch_series(tk) for name, tk in TICKERS.items()}
+        print(f"[경고] {name}({tk}) 수집 실패: {e}")
+        raw[name] = pd.Series(dtype=float)
 
 # 원자재 6종을 하나의 타임라인으로 정렬 (가장 긴 시계열 기준, 결측은 직전값으로 보간)
 master = pd.Series(dtype=float)
@@ -98,10 +100,10 @@ for k in COMMODITIES:
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# AI 프롬프트용 다운샘플 (~120 포인트)
+# AI 프롬프트용 다운샘플 (~70 포인트, 토큰·지연 절약)
 history_brief = {}
 for k, rows in history.items():
-    step = max(1, len(rows) // 120)
+    step = max(1, len(rows) // 70)
     history_brief[k] = rows[::step]
 
 
@@ -224,13 +226,17 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 def call_gemini(text: str) -> str:
     last = None
     for model in MODELS:
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
             try:
                 print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
                     r = _client.models.generate_content(
                         model=model, contents=text,
-                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            # 함수호출 미사용 → AFC 경고 억제
+                            automatic_function_calling={"disable": True},
+                        ),
                     )
                     return r.text
                 m = _legacy.GenerativeModel(model)
@@ -239,7 +245,7 @@ def call_gemini(text: str) -> str:
                 ).text
             except Exception as e:  # noqa: BLE001
                 last = e
-                wait = 2 ** attempt + 3
+                wait = 2 ** attempt
                 print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
                 time.sleep(wait)
     raise RuntimeError(f"Gemini 전체 실패: {last}")
