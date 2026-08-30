@@ -142,9 +142,16 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
 - monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
   bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
-- current_price 는 위 current_spot 값(최근 실적가)과 동일하게 쓰고, base 첫 달은 거기서
-  ±3% 이내에서 출발. 각 월에서 반드시 bear.price < base.price < bull.price.
-  base 는 월 변동 ±10% 이내로 완만하게, 급등락 금지. bull/bear 스프레드는 뒤로 갈수록 확대.
+- current_price 는 위 current_spot 값(최근 실적가)과 동일하게, base 첫 달은 거기서 ±4% 이내 출발.
+- base 경로는 '직선'이 아니라 실제 전망처럼 **월별로 방향 전환·되돌림·기울기 변화**가
+  나타나야 합니다. 참고 근거:
+  · 위 '실제 과거 유사국면'의 miniForecast(그 국면 이후 실제 6개월 궤적)의 '모양'을 참고
+    (그대로 복사 말고, 현재 매크로/컨센서스에 맞춰 조정).
+  · 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 월에 반영.
+  · 방향이 바뀔 근거가 있으면 그 달에 고점/저점을 만들어도 됩니다. 단일 방향 6연속 지양.
+- 각 월에서 bear.price < base.price < bull.price 는 반드시 유지. bull/bear 는 base 대비
+  불확실성으로, 시간이 갈수록 스프레드가 벌어지되 이벤트 리스크가 큰 달은 더 크게.
+- 6개월 누적 변화폭은 대체로 ±25% 이내(초강세/초약세 국면이면 근거와 함께 초과 가능).
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 중요한 것 위주로 4~5개 선정하고
   label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.
@@ -182,8 +189,8 @@ def call_gemini(text: str) -> str:
                     cfg = {
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},  # AFC 경고 억제
-                        "temperature": 0.2,  # 재현성↑ — 같은 입력이면 거의 같은 결과
-                        "top_p": 0.8,
+                        "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
+                        "top_p": 0.9,
                     }
                     if "2.5" in model or "gemini-3" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
@@ -197,8 +204,8 @@ def call_gemini(text: str) -> str:
                     text,
                     generation_config={
                         "response_mime_type": "application/json",
-                        "temperature": 0.2,
-                        "top_p": 0.8,
+                        "temperature": 0.35,
+                        "top_p": 0.9,
                     },
                 ).text
             except Exception as e:  # noqa: BLE001
@@ -217,9 +224,12 @@ def _n(v, d=None):
 
 
 def sanitize_scenarios(commodities: dict) -> None:
-    """Gemini 가 월별 가격을 들쭉날쭉/역전(기본<비관)으로 내는 경우가 잦아 보정한다.
-    - 기본: 현재가에서 출발해 월 ±12% · 6개월 절대 ±45% 이내로 완만화
-    - 낙관/비관: 기본 대비 스프레드 강제 (bear ≤ base ≤ bull), 월별 확대(2~24%)"""
+    """AI 의 월별 경로 '모양'은 최대한 살리고, 병리적 케이스만 최소 개입으로 바로잡는다.
+    - 현재가는 spot 으로 고정
+    - 극단 이상치만 절대 밴드(spot 의 0.5~2.0배)로 클립
+    - 각 월에서 bear < base < bull 이 되도록 어긋난 쪽만 살짝 벌림(경로는 안 뭉갬)
+    - 월 변동이 ±30% 를 넘는 튐만 30% 로 제한
+    - forecast_6m_target / change_rate 재계산"""
     for k in COMMODITIES:
         c = commodities[k]
         base = c.get("monthly_forecast_base") or []
@@ -228,31 +238,30 @@ def sanitize_scenarios(commodities: dict) -> None:
         if not base:
             continue
 
-        # 현재가는 실적 마지막 정상값(spot)으로 고정 → 차트·KPI 일관
         cur = spot.get(k) or _n(c.get("current_price"))
         if not cur or cur <= 0:
             cur = _n(base[0].get("price"), 1.0)
         c["current_price"] = round(cur, 2)
 
+        lo_abs, hi_abs = cur * 0.5, cur * 2.0
         prev = cur
         for i, row in enumerate(base):
             v = _n(row.get("price"), prev) or prev
-            v = min(max(v, prev * 0.88), prev * 1.12)          # 월 변동 ±12%
-            v = min(max(v, cur * 0.55), cur * 1.45)            # 6개월 절대 밴드
+            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동은 ±30% 까지 허용(튐만 제한)
+            v = min(max(v, lo_abs), hi_abs)             # 극단 이상치만 클립
             row["price"] = round(v, 2)
             prev = v
 
-            spread = 0.02 + 0.037 * i                          # 2% → 약 20% 로 확대
             b = row["price"]
             gu = _n((bull[i] or {}).get("price")) if i < len(bull) else None
             gd = _n((bear[i] or {}).get("price")) if i < len(bear) else None
-            # Gemini 값이 방향(위/아래)이 맞을 때만 참고, 아니면 스프레드 공식으로
-            u = b * (1 + spread)
-            if gu and gu > b * 1.005:
-                u = min(gu, b * (1 + spread + 0.08))
-            dn = b * (1 - spread)
-            if gd and gd < b * 0.995:
-                dn = max(gd, b * (1 - spread - 0.08))
+            floor_sp = 0.015 + 0.012 * i               # 최소 스프레드(1.5%→약 8%)
+            u = gu if (gu and gu > b) else b * (1 + floor_sp)
+            dn = gd if (gd and gd < b) else b * (1 - floor_sp)
+            u = max(u, b * (1 + floor_sp))             # 최소한은 벌어지게
+            dn = min(dn, b * (1 - floor_sp))
+            u = min(max(u, lo_abs), hi_abs * 1.15)
+            dn = min(max(dn, lo_abs * 0.85), hi_abs)
             if i < len(bull):
                 bull[i]["price"] = round(u, 2)
             if i < len(bear):
@@ -277,28 +286,24 @@ def validate(commodities: dict) -> None:
             raise ValueError(f"{k} monthly_forecast_base 비어 있음")
 
 
-def blend_with_previous(commodities: dict, w_new: float = 0.5) -> None:
-    """직전 실행 결과와 가중 평균해 실행 간 급변을 완화한다.
-    숫자(월별 base/bull/bear·target·변동성)만 섞고, 서술(근거·advisor·요약)은 새 값 유지."""
+def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
+    """실행 간 '급변'만 억제한다(완만화 X). 같은 달의 직전 전망 대비
+    변화가 jump 를 넘으면 그 절반만 반영해 튐을 눌러준다. AI 경로 모양은 유지."""
     try:
         prev = json.load(open("raw_materials_forecast.json", encoding="utf-8"))["forecast_data"]
     except Exception:  # noqa: BLE001
         return
     for k in COMMODITIES:
-        p = prev.get(k)
-        c = commodities.get(k)
+        p, c = prev.get(k), commodities.get(k)
         if not p or not c:
             continue
         for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
-            pm = {r.get("month"): r.get("price") for r in (p.get(arr) or [])}
+            pm = {r.get("month"): _n(r.get("price")) for r in (p.get(arr) or [])}
             for r in c.get(arr) or []:
-                pv = _n(pm.get(r.get("month")))
-                nv = _n(r.get("price"))
-                if pv and nv:
-                    r["price"] = round(w_new * nv + (1 - w_new) * pv, 2)
-        pv, nv = _n(p.get("volatility_score")), _n(c.get("volatility_score"))
-        if pv is not None and nv is not None:
-            c["volatility_score"] = round(w_new * nv + (1 - w_new) * pv)
+                pv, nv = pm.get(r.get("month")), _n(r.get("price"))
+                if pv and nv and abs(nv / pv - 1) > jump:
+                    target = pv * (1 + jump) if nv > pv else pv * (1 - jump)
+                    r["price"] = round((nv + target) / 2, 2)
 
 
 print("[진행] Gemini 전망 생성…")
@@ -306,8 +311,8 @@ try:
     parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
     validate(commodities)
-    blend_with_previous(commodities, w_new=0.5)  # 직전값과 50:50 → 완만하게 갱신
-    sanitize_scenarios(commodities)              # 블렌드 후 밴드/역전 보정 + target 재계산
+    clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
+    sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)
