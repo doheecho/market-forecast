@@ -263,6 +263,8 @@ def call_gemini(text: str) -> str:
                     cfg = {
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},  # AFC 경고 억제
+                        "temperature": 0.2,  # 재현성↑ — 같은 입력이면 거의 같은 결과
+                        "top_p": 0.8,
                     }
                     if "2.5" in model or "gemini-3" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
@@ -273,7 +275,12 @@ def call_gemini(text: str) -> str:
                     return r.text
                 m = _legacy.GenerativeModel(model)
                 return m.generate_content(
-                    text, generation_config={"response_mime_type": "application/json"}
+                    text,
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.2,
+                        "top_p": 0.8,
+                    },
                 ).text
             except Exception as e:  # noqa: BLE001
                 last = e
@@ -351,12 +358,37 @@ def validate(commodities: dict) -> None:
             raise ValueError(f"{k} monthly_forecast_base 비어 있음")
 
 
+def blend_with_previous(commodities: dict, w_new: float = 0.5) -> None:
+    """직전 실행 결과와 가중 평균해 실행 간 급변을 완화한다.
+    숫자(월별 base/bull/bear·target·변동성)만 섞고, 서술(근거·advisor·요약)은 새 값 유지."""
+    try:
+        prev = json.load(open("raw_materials_forecast.json", encoding="utf-8"))["forecast_data"]
+    except Exception:  # noqa: BLE001
+        return
+    for k in COMMODITIES:
+        p = prev.get(k)
+        c = commodities.get(k)
+        if not p or not c:
+            continue
+        for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
+            pm = {r.get("month"): r.get("price") for r in (p.get(arr) or [])}
+            for r in c.get(arr) or []:
+                pv = _n(pm.get(r.get("month")))
+                nv = _n(r.get("price"))
+                if pv and nv:
+                    r["price"] = round(w_new * nv + (1 - w_new) * pv, 2)
+        pv, nv = _n(p.get("volatility_score")), _n(c.get("volatility_score"))
+        if pv is not None and nv is not None:
+            c["volatility_score"] = round(w_new * nv + (1 - w_new) * pv)
+
+
 print("[진행] Gemini 전망 생성…")
 try:
     parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
     validate(commodities)
-    sanitize_scenarios(commodities)
+    blend_with_previous(commodities, w_new=0.5)  # 직전값과 50:50 → 완만하게 갱신
+    sanitize_scenarios(commodities)              # 블렌드 후 밴드/역전 보정 + target 재계산
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)

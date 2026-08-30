@@ -2,8 +2,8 @@ name: Market Forecasting
 
 on:
   schedule:
-    - cron: "0 22 * * *"   # 매일 07:00 KST
-  workflow_dispatch:
+    - cron: "0 22 * * 1"   # 매주 월요일 07:00 KST (6개월 전망은 주 1회면 충분)
+  workflow_dispatch:        # 필요하면 대시보드의 "↻ AI 분석 갱신" 또는 수동 실행
 
 permissions:
   contents: write

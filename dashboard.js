@@ -164,9 +164,9 @@ function render() {
   const rateStr = rate == null ? (f.forecast_change_rate || "") : `${rate > 0 ? "+" : ""}${rate.toFixed(1)}%`;
   const rateUp = rate == null ? !String(f.forecast_change_rate || "").startsWith("-") : rate >= 0;
 
-  const advisorText = stripAdvisorPrefix(f.advisor || f.planning_advisor || "");
+  const advisorText = stripAdvisorPrefix(f.advisor || f.planning_advisor || "").replace(/\s*\n\s*/g, " ").trim();
   document.getElementById("app").innerHTML = `
-    ${advisorText ? `<div class="advisor"><span class="advisor-tag">AI Advisor</span>\n${escapeHtml(advisorText)}</div>` : ""}
+    ${advisorText ? `<div class="advisor"><span class="advisor-tag">AI Advisor</span> ${escapeHtml(advisorText)}</div>` : ""}
 
     <div class="cards">
       <div class="card">
@@ -329,9 +329,13 @@ function drawMainChart() {
       plugins: {
         legend: { labels: { boxWidth: 12, font: { size: 11 } } },
         tooltip: {
-          filter: (it) => it.parsed && Number.isFinite(it.parsed.y),
+          filter: (it) => {
+            const y = it && (it.parsed && it.parsed.y != null ? it.parsed.y
+              : it.raw && typeof it.raw === "object" ? it.raw.y : it.raw);
+            return Number.isFinite(y);
+          },
           callbacks: {
-            label: (c) => `${c.dataset.label}: ${sign}${fmtNum(c.parsed.y)}`,
+            label: (c) => (Number.isFinite(c.parsed.y) ? `${c.dataset.label}: ${sign}${fmtNum(c.parsed.y)}` : ""),
           },
         },
       },
