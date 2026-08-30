@@ -88,15 +88,32 @@ for k in COMMODITIES:
         master = raw[k]
 timeline = master.index
 
+def _despike_tail(rows: list[dict]) -> list[dict]:
+    """꼬리에 튄 값(야후 마지막 봉 오류 등) 제거: 직전값 대비 ±18% 초과면 잘라냄."""
+    end = len(rows)
+    while end > 4:
+        a, b = rows[end - 1]["price"], rows[end - 2]["price"]
+        if b and abs(a / b - 1) > 0.18:
+            end -= 1
+        else:
+            break
+    return rows[:end]
+
+
 history: dict[str, list[dict]] = {}
+spot: dict[str, float] = {}
 for k in COMMODITIES:
     mult = META[k][2]
     s = raw[k].reindex(timeline).ffill().bfill()
-    history[k] = [
+    rows = [
         {"date": ts.strftime("%Y-%m-%d"), "price": round(float(v) * mult, 2)}
         for ts, v in s.items()
         if pd.notna(v)
     ]
+    rows = _despike_tail(rows)
+    history[k] = rows
+    if rows:
+        spot[k] = rows[-1]["price"]
 
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
@@ -160,7 +177,12 @@ macro = {
     "usdcny": last_val("usdcny", 7.23),
     "usdkrw": last_val("usdkrw", 1380.0),
 }
-market_input = {"update_date": update_date, "macro": macro, "history_summary": history_brief}
+market_input = {
+    "update_date": update_date,
+    "macro": macro,
+    "current_spot": {k: spot.get(k) for k in COMMODITIES},  # 최근 실적가 — current_price 앵커
+    "history_summary": history_brief,
+}
 
 # 원자재별 주요 영향 요인 — metrics 선정 가이드로 프롬프트에 주입
 FACTORS = {
@@ -201,8 +223,9 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
 - monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
   bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
-- 각 월에서 반드시 bear.price < base.price < bull.price. base 는 current_price 에서
-  출발해 월 변동 ±10% 이내로 완만하게, 급등락 금지. bull/bear 스프레드는 뒤로 갈수록 확대.
+- current_price 는 위 current_spot 값(최근 실적가)과 동일하게 쓰고, base 첫 달은 거기서
+  ±3% 이내에서 출발. 각 월에서 반드시 bear.price < base.price < bull.price.
+  base 는 월 변동 ±10% 이내로 완만하게, 급등락 금지. bull/bear 스프레드는 뒤로 갈수록 확대.
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 중요한 것 위주로 4~5개 선정하고
   label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.
@@ -275,10 +298,10 @@ def sanitize_scenarios(commodities: dict) -> None:
         if not base:
             continue
 
-        cur = _n(c.get("current_price"))
+        # 현재가는 실적 마지막 정상값(spot)으로 고정 → 차트·KPI 일관
+        cur = spot.get(k) or _n(c.get("current_price"))
         if not cur or cur <= 0:
-            h = history.get(k) or []
-            cur = h[-1]["price"] if h else _n(base[0].get("price"), 1.0)
+            cur = _n(base[0].get("price"), 1.0)
         c["current_price"] = round(cur, 2)
 
         prev = cur

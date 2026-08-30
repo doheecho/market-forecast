@@ -151,7 +151,17 @@ function render() {
   const f = d.forecast_data[state.key];
   if (!f) return;
   const sign = currencySign(f.unit);
-  const rateUp = !String(f.forecast_change_rate || "").trim().startsWith("-");
+
+  // 현재가·전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
+  const hist = despike(historyRows(state.key));
+  const base = f.monthly_forecast_base || [];
+  const spot =
+    hist.length ? hist[hist.length - 1].price
+    : Number(f.current_price) || null;
+  const target = base.length ? Number(base[base.length - 1].price) : Number(f.forecast_6m_target);
+  const rate = spot && target ? (target / spot - 1) * 100 : null;
+  const rateStr = rate == null ? (f.forecast_change_rate || "") : `${rate > 0 ? "+" : ""}${rate.toFixed(1)}%`;
+  const rateUp = rate == null ? !String(f.forecast_change_rate || "").startsWith("-") : rate >= 0;
 
   const advisorText = stripAdvisorPrefix(f.advisor || f.planning_advisor || "");
   document.getElementById("app").innerHTML = `
@@ -160,12 +170,12 @@ function render() {
     <div class="cards">
       <div class="card">
         <div class="label">현재가</div>
-        <div class="value">${sign}${fmtNum(f.current_price)}</div>
-        <div class="sub">${escapeHtml(f.unit || "")}</div>
+        <div class="value">${sign}${fmtNum(spot ?? f.current_price)}</div>
+        <div class="sub">${escapeHtml(f.unit || "")} · 최근 실적</div>
       </div>
       <div class="card">
         <div class="label">6개월 후 AI 가격전망</div>
-        <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(f.forecast_6m_target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(f.forecast_change_rate || "")}</span></div>
+        <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(rateStr)}</span></div>
         <div class="sub">기준 시나리오 (Base)</div>
       </div>
       <div class="card">
@@ -234,14 +244,26 @@ function render() {
   drawMainChart();
   renderMetrics(f);
   renderScenarios(f);
-  renderAnalogs(f, sign);
+  renderAnalogs(f, sign, rateStr);
   renderScenarioTable(f, sign);
 }
 
 /* ---------- 메인 차트 ---------- */
 function historyRows(key) {
   const d = state.data;
-  return (d.history_3y || d.history || {})[key] || [];
+  return despike((d.history_3y || d.history || {})[key] || []);
+}
+
+/* 시계열 꼬리에 튄 값(야후 마지막 봉 오류 등) 잘라냄: 직전값 대비 ±18% 초과면 제거 */
+function despike(rows) {
+  if (!Array.isArray(rows) || rows.length < 5) return rows || [];
+  let end = rows.length;
+  while (end > 4) {
+    const a = Number(rows[end - 1].price), b = Number(rows[end - 2].price);
+    if (b && Math.abs(a / b - 1) > 0.18) end--;
+    else break;
+  }
+  return end === rows.length ? rows : rows.slice(0, end);
 }
 
 function drawMainChart() {
@@ -258,11 +280,11 @@ function drawMainChart() {
   const histPts = hist.map((r) => ({ x: r.date, y: r.price }));
   const anchor = histPts.length ? histPts[histPts.length - 1] : null;
 
+  // 전망 라인은 첫 전망월부터. 마지막 실적일에는 Base/Bull/Bear 점을 찍지 않는다.
   const fc = (arr) => (arr || []).map((r) => ({ x: r.month + "-15", y: r.price }));
   const base = fc(f.monthly_forecast_base);
   const bull = fc(f.monthly_forecast_bull);
   const bear = fc(f.monthly_forecast_bear);
-  const lead = anchor ? [anchor] : [];
 
   const ds = [
     {
@@ -271,16 +293,16 @@ function drawMainChart() {
       pointRadius: 0, fill: true, tension: 0.25, order: 5,
     },
     {
-      label: "Bull", data: lead.concat(bull), borderColor: "#ef4444",
+      label: "Bull", data: bull, borderColor: "#ef4444",
       borderWidth: 1.4, borderDash: [4, 3], pointRadius: 0, fill: false, tension: 0.3, order: 3,
     },
     {
-      label: "Bear", data: lead.concat(bear), borderColor: "#3b82f6",
+      label: "Bear", data: bear, borderColor: "#3b82f6",
       backgroundColor: "rgba(99,110,140,0.10)", borderWidth: 1.4, borderDash: [4, 3],
       pointRadius: 0, fill: "-1", tension: 0.3, order: 3,
     },
     {
-      label: "Base", data: lead.concat(base), borderColor: "#f59e0b",
+      label: "Base", data: base, borderColor: "#f59e0b",
       borderWidth: 2.6, pointRadius: 0, fill: false, tension: 0.3, order: 1,
     },
   ];
@@ -377,7 +399,7 @@ function renderScenarios(f) {
 }
 
 /* ---------- 과거 유사 국면 ---------- */
-function renderAnalogs(f, sign) {
+function renderAnalogs(f, sign, rateStr) {
   const box = document.getElementById("analogs");
   const list = f.analogs || [];
   if (!list.length) {
@@ -387,7 +409,7 @@ function renderAnalogs(f, sign) {
   box.innerHTML = list
     .map((a, i) => {
       const past = a.actual != null && a.actual !== "" ? a.actual : "—";
-      const now = f.forecast_change_rate || "—";
+      const now = rateStr || f.forecast_change_rate || "—";
       return `<div class="analog">
         <div class="head">
           <span class="title">${escapeHtml(a.title || "유사 국면")}</span>
