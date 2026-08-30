@@ -527,7 +527,7 @@ function renderAnalogs(f, sign, rateStr) {
         <span class="title">${list.length > 1 ? CIRCLED(idx) + " " : ""}${escapeHtml(a.title || "유사 국면")}</span>
         <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
       </div>
-      <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 최근 ${win === 6 ? "6" : "12"}개월 추이 상관도 기준</div>
+      <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 최근 ${win === 6 ? "6" : "12"}개월 가격궤적(모양·진폭) 유사도 기준</div>
       <p class="summary">${escapeHtml(a.summary || "")}</p>
       <div class="mini-box"><canvas id="mini0"></canvas></div>
       <div class="foot">

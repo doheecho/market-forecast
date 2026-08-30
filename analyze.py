@@ -80,31 +80,49 @@ def _monthly_series(key: str):
     return ser.resample("ME").last().dropna(), 1.0
 
 
+_SIM_MIN = 0.5  # 유사도(0~1) 채택 문턱. 없으면 0개, 많으면 여러 개
+
+
 def top_analogs(key: str, win: int = 12) -> list[dict]:
-    """현재 최근 `win`개월 궤적과 월간수익률 상관이 높은 과거 구간을 겹치지 않게
-    유사도 내림차순으로 반환. 각 구간의 실제 가격 `win`개 + 이후 6개월 실제 6개."""
+    """현재 최근 `win`개월 '가격 궤적'과 모양·진폭이 닮은 과거 구간을 겹치지 않게
+    유사도 내림차순으로 반환. 각 구간의 실제 가격 `win`개 + 이후 6개월 실제 6개.
+
+    유사도 = (정규화 가격경로 상관, 0~1) × (0.6 + 0.4 × 진폭비).
+    - 정규화 경로 상관: 첫 값을 100 으로 리베이스한 곡선끼리의 Pearson 상관 →
+      '방향·굴곡'이 같은지. (기존의 '월간수익률' 상관은 잔진동 리듬만 봐서,
+      +90% 폭등 구간이 -9% 횡보 구간과 90% 유사로 잡히는 오류가 있었음)
+    - 진폭비 = min(범위)/max(범위): 한쪽은 급등·한쪽은 횡보처럼 '크기'가 다르면 감점.
+    """
     m, mult = _monthly_series(key)
     if m is None or len(m) < win + _FWD + win:
         return []
-    sim_min = 0.6 if win <= 6 else 0.5   # 표본이 짧을수록(상관 불안정) 문턱을 높임
     excl = max(4, win * 2 // 3)          # 겹침 배제 간격
-    cur_ret = m.iloc[-win:].pct_change().dropna().values
+    cur = m.iloc[-win:]
+    cur_path = (cur / cur.iloc[0] * 100.0).to_numpy()
+    cur_amp = float(cur_path.max() - cur_path.min())
 
     cands = []
     for i in range(len(m) - win - _FWD):
         w = m.iloc[i:i + win]
         if w.index[-1] >= m.index[-win]:
             break
-        r = w.pct_change().dropna().values
-        if len(r) != len(cur_ret):
+        if w.isna().any() or not w.iloc[0]:
             continue
-        c = float(pd.Series(r).corr(pd.Series(cur_ret)))
-        if c == c and c >= sim_min:
-            cands.append((c, i, w, m.iloc[i + win:i + win + _FWD]))
+        wp = (w / w.iloc[0] * 100.0).to_numpy()
+        if len(wp) != len(cur_path):
+            continue
+        pc = float(pd.Series(wp).corr(pd.Series(cur_path)))
+        if pc != pc:                     # NaN (분산 0 등)
+            continue
+        amp = float(wp.max() - wp.min())
+        amp_ratio = min(amp, cur_amp) / max(amp, cur_amp) if max(amp, cur_amp) else 0.0
+        sim = max(0.0, pc) * (0.6 + 0.4 * amp_ratio)
+        if sim >= _SIM_MIN:
+            cands.append((sim, i, w, m.iloc[i + win:i + win + _FWD]))
     cands.sort(key=lambda x: -x[0])
 
     out, used = [], []
-    for c, i, w, after in cands:
+    for sim, i, w, after in cands:
         if any(abs(i - j) < excl for j in used):
             continue
         used.append(i)
@@ -113,7 +131,7 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
         chg = (fore_p[-1] / hist_p[-1] - 1) * 100 if hist_p and hist_p[-1] else 0.0
         out.append({
             "period": f"'{w.index[0].strftime('%y.%m')}~'{w.index[-1].strftime('%y.%m')}",
-            "similarity": f"{max(0.0, c) * 100:.0f}%",
+            "similarity": f"{sim * 100:.0f}%",
             "actual": f"{chg:+.1f}%",
             "miniHist": hist_p,
             "miniForecast": fore_p,
@@ -247,10 +265,10 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t,
   steel USD/s.ton, ironore USD/dmt.
 
-[실제 과거 유사국면 (1년) — 실거래 데이터 상관분석]
+[실제 과거 유사국면 (1년) — 실거래 가격궤적 유사도 분석]
 {json.dumps(analogs_real, ensure_ascii=False)}
 
-[실제 과거 유사국면 (6개월) — 실거래 데이터 상관분석]
+[실제 과거 유사국면 (6개월) — 실거래 가격궤적 유사도 분석]
 {json.dumps(analogs_real_6m, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
