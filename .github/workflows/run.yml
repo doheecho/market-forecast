@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "0 22 * * 1"   # 매주 월요일 07:00 KST (6개월 전망은 주 1회면 충분)
   workflow_dispatch:        # 필요하면 대시보드의 "↻ AI 분석 갱신" 또는 수동 실행
+  push:
+    branches: [main]
+    paths:
+      - "manual/**"          # 니켈·아연·텅스텐 CSV 를 (웹에서든) 수정하면 바로 재생성
 
 permissions:
   contents: write

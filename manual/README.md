@@ -4,12 +4,17 @@
 `prices.py`·`analyze.py` 가 **매 실행마다** 이 폴더를 읽어 `history_3y` 에 병합하고,
 `analyze.py` 는 이 시세로 6개월 전망까지 만듭니다.
 
-## 넣는 법
+## 넣는 법 (제일 쉬운 방법: GitHub 웹에서 바로)
 
 1. 엑셀에서 **날짜 + 종가** 두 열로 정리 → `다른 이름으로 저장 → CSV`.
-2. 파일명을 품목 키로: `nickel.csv` / `zinc.csv` / `tungsten.csv` (이 폴더의 것을 덮어쓰기).
-3. GitHub 에 커밋·푸시 (웹에서 파일 업로드해도 됨).
-   → 다음 배포부터 대시보드에 해당 탭이 생깁니다.
+2. GitHub 저장소 → `manual/` 폴더 → `nickel.csv` (또는 zinc/tungsten) 클릭
+   → 연필 아이콘(Edit) → 내용 전체 지우고 새 CSV 붙여넣기 → **Commit changes**.
+   (또는 폴더에서 **Add file → Upload files** 로 파일을 끌어다 놓고 커밋)
+3. 커밋하면 **Market Forecasting 워크플로가 자동 실행**됩니다(`manual/**` push 트리거).
+   2~3분 뒤 대시보드에 해당 탭이 생기고, 다음부터는 이 CSV 만 고치면 자동 반영됩니다.
+
+로컬에서 고칠 경우엔 `git add manual && git commit && git push` 만 하면 됩니다
+(그것도 push 하면 워크플로가 알아서 돕니다).
 
 ## CSV 형식
 
