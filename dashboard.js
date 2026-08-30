@@ -18,6 +18,14 @@ const LABEL = {
   gold: "금", silver: "은", platinum: "백금",
   steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연",
 };
+// 현재가 카드에서 단위 옆에 표기할 시장/기준 (제목에서는 뺀다)
+const VENUE = {
+  wti: "CME", copper: "LME Cash", aluminum: "LME Cash",
+  gold: "LBMA", silver: "LBMA", platinum: "LBMA / NYMEX",
+  steel: "CME HRC", ironore: "CFR China", nickel: "LME Cash", zinc: "LME Cash",
+};
+// f.name / 라벨에서 괄호 부속(예: " (CME)") 제거
+const stripVenue = (s) => String(s || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
 const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
@@ -141,7 +149,7 @@ function buildTabs() {
     .map(
       (k) =>
         `<button data-key="${k}"${k === state.key ? ' class="active"' : ""}>${
-          state.data.forecast_data[k].name || LABEL[k] || k
+          escapeHtml(LABEL[k] || stripVenue(state.data.forecast_data[k].name) || k)
         }</button>`
     )
     .join("");
@@ -162,6 +170,7 @@ function render() {
   const f = d.forecast_data[state.key];
   if (!f) return;
   const sign = currencySign(f.unit);
+  const venue = VENUE[state.key] || (String(f.name || "").match(/\(([^)]+)\)/) || [])[1] || "";
 
   // 현재가·전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
   const hist = historyRows(state.key); // 이미 despike 됨
@@ -191,7 +200,7 @@ function render() {
       <div class="card">
         <div class="label">현재가</div>
         <div class="value">${sign}${fmtNum(spot ?? f.current_price)}</div>
-        <div class="sub">${escapeHtml(f.unit || "")} · 최근 실적</div>
+        <div class="sub">${escapeHtml(f.unit || "")}${venue ? " · " + escapeHtml(venue) : ""}</div>
       </div>
       <div class="card">
         <div class="label">6개월 후 AI 가격전망</div>
