@@ -262,7 +262,7 @@ function render() {
     </div>
 
     <div class="block scn-block">
-      <h3>6개월 가격 시나리오</h3>
+      <h3>가격 시나리오 (6개월)</h3>
       <div class="tbl-scroll">
         <table class="scn-table">
           <thead>
@@ -650,7 +650,7 @@ function renderScenarioTable(f, sign) {
   body.innerHTML = base
     .map(
       (b, i) => `<tr>
-        <td class="col-month"><span class="badge secondary">${escapeHtml(b.month || "")} (E)</span></td>
+        <td class="col-month"><span class="badge secondary">${escapeHtml(fmtYm(b.month))}</span></td>
         ${cell(b, "base")}
         ${cell(bull[i], "bull")}
         ${cell(bear[i], "bear")}
@@ -676,6 +676,11 @@ function fmtNum(v) {
 }
 function rangeText(l) {
   return { "3M": "3개월", "6M": "6개월", "1Y": "1년", "2Y": "2년", "3Y": "3년", "5Y": "5년", ALL: "전체" }[l] || l;
+}
+/* "2026-09" → "'26.9월" */
+function fmtYm(ym) {
+  const m = String(ym == null ? "" : ym).match(/(\d{4})-(\d{1,2})/);
+  return m ? `'${m[1].slice(2)}.${Number(m[2])}월` : String(ym == null ? "" : ym);
 }
 function badgeClass(b) {
   return ["danger", "warning", "success", "secondary"].includes(b) ? b : "secondary";
