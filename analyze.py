@@ -180,9 +180,9 @@ SCHEMA_ONE = """{
   "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
   "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
   "advisor": "원자재 구매 담당자를 위한 3~4문장. 최근 시황 / 관련 글로벌 정세 / 알아야 할 주요 뉴스 / 대응 조언 순서로 서술.",
-  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 가격 산정 근거 한 문장"} ],
-  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0} ],
-  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0} ],
+  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 기본 시나리오 가격 근거 한 문장"} ],
+  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 낙관 시나리오 가격 근거(상방 요인 중심) 한 문장"} ],
+  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
   "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
   "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
@@ -196,6 +196,8 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 
 규칙:
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
+- monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
+  bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 중요한 것 위주로 4~5개 선정하고
   label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.

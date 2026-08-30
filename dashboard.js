@@ -20,7 +20,7 @@ const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
 
-const state = { data: null, key: "wti", months: 12, charts: {} };
+const state = { data: null, key: "wti", months: 12, rn: "base", charts: {} };
 
 /* ---------- 부트스트랩 ---------- */
 if (window.Chart) {
@@ -202,11 +202,17 @@ function render() {
 
     <div class="block">
       <h3>6개월 가격 예측 근거</h3>
+      <div class="ctl-row" id="rnRow">
+        <span class="ctl-lbl">시나리오</span>
+        <button data-rn="base"${state.rn === "base" ? ' class="on"' : ""}>기본</button>
+        <button data-rn="bull"${state.rn === "bull" ? ' class="on"' : ""}>낙관</button>
+        <button data-rn="bear"${state.rn === "bear" ? ' class="on"' : ""}>비관</button>
+      </div>
       <table>
         <thead><tr><th style="width:14%">대상월</th><th style="width:20%">전망 가격</th><th>예측 근거 · 주요 요인</th></tr></thead>
         <tbody id="rationaleBody"></tbody>
       </table>
-      <div class="src">거시(DXY ${fmtNum(d.macro?.dxy)} · 美10Y ${fmtNum(d.macro?.us10y)}% · USD/CNY ${fmtNum(d.macro?.usdcny)} · USD/KRW ${fmtNum(d.macro?.usdkrw)}) 기준</div>
+      <div class="src">거시(DXY ${fmtNum(d.macro?.dxy)} · 美10Y ${fmtNum(d.macro?.us10y)}% · USD/CNY ${fmtNum(d.macro?.usdcny)} · USD/KRW ${fmtNum(d.macro?.usdkrw)}) 기준 · AI 생성</div>
     </div>`;
 
   document.getElementById("rangeRow").addEventListener("click", (e) => {
@@ -215,6 +221,13 @@ function render() {
     state.months = +b.dataset.m;
     document.querySelectorAll("#rangeRow button").forEach((x) => x.classList.toggle("on", x === b));
     drawMainChart();
+  });
+  document.getElementById("rnRow").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-rn]");
+    if (!b) return;
+    state.rn = b.dataset.rn;
+    document.querySelectorAll("#rnRow button").forEach((x) => x.classList.toggle("on", x === b));
+    renderRationale(f, sign);
   });
 
   drawMainChart();
@@ -450,16 +463,23 @@ function drawMini(i, a, curMonthly, curBase) {
   });
 }
 
-/* ---------- 근거 표 ---------- */
+/* ---------- 근거 표 (기본/낙관/비관) ---------- */
 function renderRationale(f, sign) {
   const body = document.getElementById("rationaleBody");
-  const list = f.monthly_forecast_base || [];
+  const scn = state.rn || "base";
+  const list = f["monthly_forecast_" + scn] || f.monthly_forecast_base || [];
+  const fallback = {
+    base: "매크로 및 원자재 스프레드 변동에 따라 조정될 전망",
+    bull: "상방 리스크(공급 차질·수요 서프라이즈) 현실화 시의 경로",
+    bear: "하방 리스크(수요 둔화·재고 증가) 현실화 시의 경로",
+  }[scn];
+  const cls = { base: "secondary", bull: "danger", bear: "success" }[scn] || "secondary";
   body.innerHTML = list
     .map(
       (r) => `<tr>
-        <td class="m"><span class="badge secondary">${escapeHtml(r.month || "")} (E)</span></td>
+        <td class="m"><span class="badge ${cls}">${escapeHtml(r.month || "")} (E)</span></td>
         <td class="mono">${sign}${fmtNum(r.price)}</td>
-        <td>${escapeHtml(r.rationale || "매크로 및 원자재 스프레드 변동에 따라 조정될 전망")}</td>
+        <td>${escapeHtml(r.rationale || fallback)}</td>
       </tr>`
     )
     .join("");
