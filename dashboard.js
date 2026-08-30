@@ -20,7 +20,7 @@ const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
 
-const state = { data: null, key: "wti", months: 12, charts: {} };
+const state = { data: null, key: "wti", months: 12, analogIdx: 0, charts: {} };
 
 /* ---------- 부트스트랩 ---------- */
 if (window.Chart) {
@@ -146,6 +146,7 @@ function buildTabs() {
   nav.querySelectorAll("button").forEach((b) =>
     b.addEventListener("click", () => {
       state.key = b.dataset.key;
+      state.analogIdx = 0;
       nav.querySelectorAll("button").forEach((x) => x.classList.toggle("active", x === b));
       render();
     })
@@ -446,37 +447,58 @@ function renderScenarios(f) {
     row("bear", "비관 (Bear)", f.rationale_bear);
 }
 
-/* ---------- 과거 유사 국면 ---------- */
+/* ---------- 과거 유사 국면 (여러 개면 ①②… 번호로 전환) ---------- */
+const CIRCLED = (i) => String.fromCharCode(0x2460 + i); // ①②③④⑤
+
 function renderAnalogs(f, sign, rateStr) {
   const box = document.getElementById("analogs");
+  const h3 = document.querySelector("#analogBlock h3");
   const list = f.analogs || [];
+  if (h3) h3.querySelector(".analog-nav")?.remove();
+
   if (!list.length) {
     box.innerHTML = "<p class='src'>유사 국면 데이터 없음 (AI 분석 갱신 후 표시)</p>";
     return;
   }
-  box.innerHTML = list
-    .map((a, i) => {
-      const past = a.actual != null && a.actual !== "" ? a.actual : "—";
-      const now = rateStr || f.forecast_change_rate || "—";
-      return `<div class="analog">
-        <div class="head">
-          <span class="title">${escapeHtml(a.title || "유사 국면")}</span>
-          <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
-        </div>
-        <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 월간 추이 상관도 기준</div>
-        <p class="summary">${escapeHtml(a.summary || "")}</p>
-        <div class="mini-box"><canvas id="mini${i}"></canvas></div>
-        <div class="foot">
-          <span class="kv"><small>이 국면 이후 6개월 실제</small><b>${escapeHtml(past)}</b></span>
-          <span class="kv" style="text-align:right"><small>현재 모델 6개월 전망</small><b>${escapeHtml(now)}</b></span>
-        </div>
-      </div>`;
-    })
-    .join("");
+
+  const idx = Math.min(state.analogIdx || 0, list.length - 1);
+  state.analogIdx = idx;
+
+  if (list.length > 1 && h3) {
+    const nav = document.createElement("span");
+    nav.className = "analog-nav";
+    nav.innerHTML = list
+      .map((_, i) => `<button data-i="${i}"${i === idx ? ' class="on"' : ""}>${CIRCLED(i)}</button>`)
+      .join("");
+    nav.addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-i]");
+      if (!b) return;
+      state.analogIdx = +b.dataset.i;
+      renderAnalogs(f, sign, rateStr);
+    });
+    h3.appendChild(nav);
+  }
+
+  const a = list[idx];
+  const past = a.actual != null && a.actual !== "" ? a.actual : "—";
+  const now = rateStr || f.forecast_change_rate || "—";
+  box.innerHTML = `<div class="analog">
+      <div class="head">
+        <span class="title">${list.length > 1 ? CIRCLED(idx) + " " : ""}${escapeHtml(a.title || "유사 국면")}</span>
+        <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
+      </div>
+      <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 월간 추이 상관도 기준</div>
+      <p class="summary">${escapeHtml(a.summary || "")}</p>
+      <div class="mini-box"><canvas id="mini0"></canvas></div>
+      <div class="foot">
+        <span class="kv"><small>이 국면 이후 6개월 실제</small><b>${escapeHtml(past)}</b></span>
+        <span class="kv" style="text-align:right"><small>현재 모델 6개월 전망</small><b>${escapeHtml(now)}</b></span>
+      </div>
+    </div>`;
 
   const curMonthly = monthlyCloses(historyRows(state.key));
   const curBase = (f.monthly_forecast_base || []).map((r) => Number(r.price)).filter(Number.isFinite);
-  list.forEach((a, i) => drawMini(i, a, curMonthly, curBase));
+  drawMini(0, a, curMonthly, curBase);
 }
 
 /* 일/주봉 시계열 → 월별 마지막 종가 배열 */
@@ -490,6 +512,8 @@ function monthlyCloses(rows) {
    - 과거 실적(하늘색) / 과거 이후 실제(초록 점선)
    - 현재 실적(자홍) / 현재 전망(보라 점선)  ← 과거와 같은 구간 길이로 정렬 */
 function drawMini(i, a, curMonthly, curBase) {
+  const cid = "mini" + i;
+  if (state.charts[cid]) { try { state.charts[cid].destroy(); } catch (_) {} delete state.charts[cid]; }
   const pastH = (a.miniHist || []).map(Number).filter(Number.isFinite);
   const pastF = (a.miniForecast || []).map(Number).filter(Number.isFinite);
   if (pastH.length < 2) return;

@@ -54,44 +54,52 @@ for k, rows in history.items():
     history_brief[k] = rows[::step]
 
 
-def best_analog(key: str) -> dict | None:
-    """현재 12개월 궤적과 월간수익률 상관이 가장 높은 과거 12개월 구간을 실데이터에서 탐색.
-    그 구간의 실제 가격 12개 + 이후 6개월 실제 가격 6개를 그대로 반환(AI 가 서술만 붙임)."""
+def top_analogs(key: str, n: int = 2) -> list[dict]:
+    """현재 12개월 궤적과 월간수익률 상관이 높은 과거 구간 상위 n개(겹치지 않게)를
+    실데이터에서 탐색. 각 구간의 실제 가격 12개 + 이후 6개월 실제 6개를 그대로 반환."""
     s = raw.get(key)
     if s is None or s.empty:
-        return None
+        return []
     m = s.resample("ME").last().dropna()
     if len(m) < 12 + 6 + 12:
-        return None
+        return []
     mult = META[key][2]
     cur_ret = m.iloc[-12:].pct_change().dropna().values
-    best = None
+
+    cands = []
     for i in range(len(m) - 12 - 6):
         win = m.iloc[i:i + 12]
-        if win.index[-1] >= m.index[-12]:      # 현재 구간과 겹치면 중단
+        if win.index[-1] >= m.index[-12]:
             break
         r = win.pct_change().dropna().values
         if len(r) != len(cur_ret):
             continue
         c = float(pd.Series(r).corr(pd.Series(cur_ret)))
-        if c == c and (best is None or c > best[0]):
-            best = (c, win, m.iloc[i + 12:i + 18])
-    if not best or best[0] < 0.3:
-        return None
-    c, win, after = best
-    hist_p = [round(float(v) * mult, 2) for v in win.values]
-    fore_p = [round(float(v) * mult, 2) for v in after.values]
-    chg = (fore_p[-1] / hist_p[-1] - 1) * 100 if hist_p and hist_p[-1] else 0.0
-    return {
-        "period": f"'{win.index[0].strftime('%y.%m')}~'{win.index[-1].strftime('%y.%m')}",
-        "similarity": f"{max(0.0, c) * 100:.0f}%",
-        "actual": f"{chg:+.1f}%",
-        "miniHist": hist_p,
-        "miniForecast": fore_p,
-    }
+        if c == c and c >= 0.3:
+            cands.append((c, i, win, m.iloc[i + 12:i + 18]))
+    cands.sort(key=lambda x: -x[0])
+
+    out, used = [], []
+    for c, i, win, after in cands:
+        if any(abs(i - j) < 8 for j in used):   # 8개월 이내 겹침 배제
+            continue
+        used.append(i)
+        hist_p = [round(float(v) * mult, 2) for v in win.values]
+        fore_p = [round(float(v) * mult, 2) for v in after.values]
+        chg = (fore_p[-1] / hist_p[-1] - 1) * 100 if hist_p and hist_p[-1] else 0.0
+        out.append({
+            "period": f"'{win.index[0].strftime('%y.%m')}~'{win.index[-1].strftime('%y.%m')}",
+            "similarity": f"{max(0.0, c) * 100:.0f}%",
+            "actual": f"{chg:+.1f}%",
+            "miniHist": hist_p,
+            "miniForecast": fore_p,
+        })
+        if len(out) >= n:
+            break
+    return out
 
 
-analogs_real = {k: best_analog(k) for k in COMMODITIES}
+analogs_real = {k: top_analogs(k, 2) for k in COMMODITIES}
 
 
 update_date = today_str()
@@ -167,9 +175,9 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs 는 각 원자재당 1개. period/similarity/actual/miniHist/miniForecast 는
-  아래 '실제 과거 유사국면' 값을 그대로 복사하세요(임의 생성 금지).
-  title(그 시기 실제 사건명)·summary 만 채우세요.
+- analogs 는 아래 '실제 과거 유사국면' 리스트의 각 항목당 1개씩 만드세요(리스트 순서·개수 그대로).
+  period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
+  title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
   우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
