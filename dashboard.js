@@ -498,7 +498,7 @@ function renderScenarios(f) {
 }
 
 /* ---------- 과거 유사 국면 (1년/6개월 비교창 · 여러 개면 ①②… 로 전환) ---------- */
-const CIRCLED = (i) => String.fromCharCode(0x2460 + i); // ①②③④⑤
+const CIRCLED = (i) => String(i + 1); // 사례 번호 (동그라미 없이 1,2,3 — 가로정렬)
 
 function renderAnalogs(f, sign, rateStr) {
   const box = document.getElementById("analogs");
@@ -557,7 +557,7 @@ function renderAnalogs(f, sign, rateStr) {
   const now = rateStr || f.forecast_change_rate || "—";
   box.innerHTML = `<div class="analog">
       <div class="head">
-        <span class="title">${list.length > 1 ? CIRCLED(idx) + " " : ""}${escapeHtml(a.title || "유사 국면")}</span>
+        <span class="title">${list.length > 1 ? CIRCLED(idx) + ". " : ""}${escapeHtml(a.title || "유사 국면")}</span>
         <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
       </div>
       <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 최근 ${win === 6 ? "6" : "12"}개월 가격궤적(모양·진폭) 유사도 기준</div>
