@@ -31,6 +31,14 @@ if (window.Chart) {
 }
 document.addEventListener("DOMContentLoaded", init);
 document.getElementById("refreshBtn").addEventListener("click", () => load(true));
+
+function setAsOf(d) {
+  const px = d && d.prices_date;
+  const fc = d && d.update_date;
+  document.getElementById("asOf").textContent =
+    px && fc && px !== fc ? `시세 ${px} · 전망 ${fc}`
+    : `기준일 ${fc || px || "—"}`;
+}
 document.getElementById("rerunBtn").addEventListener("click", rerunAnalysis);
 
 async function init() {
@@ -65,7 +73,7 @@ async function rerunAnalysis() {
             const d = await fetchFirst([JSON_LOCAL + "?t=" + Date.now(), JSON_RAW + "?t=" + Date.now()]);
             if (d && d.update_date && JSON.stringify(d) !== JSON.stringify(state.data)) {
               state.data = d;
-              document.getElementById("asOf").textContent = "기준일 " + d.update_date;
+              setAsOf(d);
               render();
               toast("AI 분석 갱신 완료");
               return;
@@ -101,7 +109,7 @@ async function load(bust) {
     if (!ORDER.some((k) => data.forecast_data && data.forecast_data[k])) {
       throw new Error("forecast_data 가 비어 있습니다");
     }
-    document.getElementById("asOf").textContent = "기준일 " + (data.update_date || "—");
+    setAsOf(data);
     buildTabs();
     render();
   } catch (e) {

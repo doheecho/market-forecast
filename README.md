@@ -1,19 +1,25 @@
 # 원자재 시황 — 6대 핵심 원자재 AI 가격 전망
 
 WTI·전기동·알루미늄·금·은·백금의 6개월 가격 전망(Base/Bull/Bear) 대시보드.
-매일 07:00 KST 에 GitHub Actions 가 야후 파이낸스 시세를 수집하고 Gemini 로
-전망 JSON 을 생성해 커밋합니다. (메-Stock 과 동일한 구성)
+**시세는 평일 매일**, **AI 전망은 주 1회(월요일)** GitHub Actions 가 갱신합니다.
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `analyze.py` | 시세 수집 → Gemini 전망 생성 → `raw_materials_forecast.json` 저장 |
-| `raw_materials_forecast.json` | 대시보드가 읽는 데이터 (Actions 가 자동 갱신) |
+| `_common.py` | 야후 파이낸스 수집 공용 로직 (analyze/prices 공유) |
+| `prices.py` | **시세만** 갱신 (Gemini 미사용) — `history_3y`·`macro`·`prices_date` 교체 |
+| `analyze.py` | 시세 + Gemini → 6개월 전망(`forecast_data`) 생성 |
+| `raw_materials_forecast.json` | 대시보드가 읽는 단일 데이터 파일 (Actions 자동 갱신) |
 | `index.html` + `dashboard.js` | 정적 대시보드 (다크 테마) |
-| `.github/workflows/run.yml` | 매일 예보 생성 |
-| `.github/workflows/pages.yml` | GitHub Pages 배포 (push / 예보 완료 시) |
+| `.github/workflows/prices.yml` | 평일 06:30 KST 시세 갱신 |
+| `.github/workflows/run.yml` | 월요일 07:00 KST AI 전망 생성 |
+| `.github/workflows/pages.yml` | GitHub Pages 배포 (push / 위 두 워크플로 완료 시) |
 | `index_github.html` | 구 링크 호환용 → `index.html` 리다이렉트 |
+
+- **↻ 새로고침** 버튼: 커밋된 JSON 파일을 다시 받아옴 (워크플로 실행 안 함).
+- **↻ AI 분석 갱신** 버튼: `run.yml` 을 지금 실행 (proxy 배포 시 자동, 아니면 Actions 페이지 열기).
+- `analyze.py` 는 Gemini `temperature=0.2` + 직전 실행값과 50:50 블렌드로 실행 간 급변을 억제.
 
 ## 업데이트 방법 (메-Stock 과 동일)
 

@@ -11,10 +11,12 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
 
 import pandas as pd
-import yfinance as yf
+
+from _common import (
+    COMMODITIES, META, build_history, fetch_raw, latest_macro, today_str,
+)
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
@@ -40,81 +42,8 @@ except ImportError:
     _legacy.configure(api_key=API_KEY)
     _NEW_SDK = False
 
-TICKERS = {
-    "copper": "HG=F", "aluminum": "ALI=F", "wti": "CL=F",
-    "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F",
-    "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
-}
-COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum"]
-
-# name, unit, 가격 배수(야후 원값 → 표기 단위)
-META = {
-    "wti": ("WTI 원유 (CME)", "USD/bbl", 1.0),
-    "copper": ("전기동 (LME)", "USD/ton", 2204.62),   # HG=F: USD/lb → USD/ton
-    "aluminum": ("알루미늄 (LME)", "USD/ton", 1.0),
-    "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
-    "silver": ("은 (LBMA)", "US￠/oz.t", 100.0),        # SI=F: USD/oz → US¢/oz
-    "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
-}
-
-
-print("[진행] 야후 파이낸스 시계열 수집 중… (10개 티커 일괄)")
-# 개별 yf.Ticker().history() 를 티커마다 부르면 Actions IP 에서 스로틀링으로 매우 느림.
-# yf.download 한 번으로 10개 티커를 병렬 수집한다.
-_dl = yf.download(
-    list(TICKERS.values()),
-    period="6y", interval="1d",
-    auto_adjust=True, progress=False, threads=True, group_by="column",
-)
-try:
-    _close = _dl["Close"]
-except Exception:  # noqa: BLE001
-    _close = _dl
-raw: dict[str, pd.Series] = {}
-for name, tk in TICKERS.items():
-    try:
-        s = _close[tk].dropna()
-        if getattr(s.index, "tz", None) is not None:
-            s.index = s.index.tz_localize(None)
-        raw[name] = s
-    except Exception as e:  # noqa: BLE001
-        print(f"[경고] {name}({tk}) 수집 실패: {e}")
-        raw[name] = pd.Series(dtype=float)
-
-# 원자재 6종을 하나의 타임라인으로 정렬 (가장 긴 시계열 기준, 결측은 직전값으로 보간)
-master = pd.Series(dtype=float)
-for k in COMMODITIES:
-    if len(raw[k]) > len(master):
-        master = raw[k]
-timeline = master.index
-
-def _despike_tail(rows: list[dict]) -> list[dict]:
-    """꼬리에 튄 값(야후 마지막 봉 오류 등) 제거: 직전값 대비 ±18% 초과면 잘라냄."""
-    end = len(rows)
-    while end > 4:
-        a, b = rows[end - 1]["price"], rows[end - 2]["price"]
-        if b and abs(a / b - 1) > 0.18:
-            end -= 1
-        else:
-            break
-    return rows[:end]
-
-
-history: dict[str, list[dict]] = {}
-spot: dict[str, float] = {}
-for k in COMMODITIES:
-    mult = META[k][2]
-    s = raw[k].reindex(timeline).ffill().bfill()
-    rows = [
-        {"date": ts.strftime("%Y-%m-%d"), "price": round(float(v) * mult, 2)}
-        for ts, v in s.items()
-        if pd.notna(v)
-    ]
-    rows = _despike_tail(rows)
-    history[k] = rows
-    if rows:
-        spot[k] = rows[-1]["price"]
-
+raw = fetch_raw()
+history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
@@ -165,18 +94,8 @@ def best_analog(key: str) -> dict | None:
 analogs_real = {k: best_analog(k) for k in COMMODITIES}
 
 
-def last_val(name: str, default: float) -> float:
-    s = raw.get(name)
-    return round(float(s.iloc[-1]), 4) if s is not None and not s.empty else default
-
-
-update_date = datetime.now().strftime("%Y-%m-%d")
-macro = {
-    "dxy": last_val("dxy", 104.2),
-    "us10y": last_val("us10y", 4.15),
-    "usdcny": last_val("usdcny", 7.23),
-    "usdkrw": last_val("usdkrw", 1380.0),
-}
+update_date = today_str()
+macro = latest_macro(raw)
 market_input = {
     "update_date": update_date,
     "macro": macro,
@@ -394,9 +313,10 @@ except Exception as e:  # noqa: BLE001
     sys.exit(1)
 
 output = {
-    "update_date": update_date,
+    "update_date": update_date,   # AI 전망 생성일
+    "prices_date": update_date,   # 시세 갱신일 (prices.py 가 매일 덮어씀)
     "macro": macro,
-    "history_3y": history,   # (호환) 키 이름 유지 — 실제로는 최대 10년치
+    "history_3y": history,        # (호환) 키 이름 유지
     "forecast_data": commodities,
 }
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
