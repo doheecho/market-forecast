@@ -20,7 +20,7 @@ const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
 
-const state = { data: null, key: "wti", months: 12, rn: "base", charts: {} };
+const state = { data: null, key: "wti", months: 12, charts: {} };
 
 /* ---------- 부트스트랩 ---------- */
 if (window.Chart) {
@@ -200,18 +200,26 @@ function render() {
       </div>
     </div>
 
-    <div class="block">
-      <h3>6개월 가격 예측 근거</h3>
-      <div class="ctl-row" id="rnRow">
-        <span class="ctl-lbl">시나리오</span>
-        <button data-rn="base"${state.rn === "base" ? ' class="on"' : ""}>기본</button>
-        <button data-rn="bull"${state.rn === "bull" ? ' class="on"' : ""}>낙관</button>
-        <button data-rn="bear"${state.rn === "bear" ? ' class="on"' : ""}>비관</button>
+    <div class="block scn-block">
+      <h3>6개월 가격 시나리오</h3>
+      <div class="tbl-scroll">
+        <table class="scn-table">
+          <thead>
+            <tr>
+              <th rowspan="2" class="col-month">대상월</th>
+              <th colspan="2" class="grp base">기본</th>
+              <th colspan="2" class="grp bull">낙관</th>
+              <th colspan="2" class="grp bear">비관</th>
+            </tr>
+            <tr>
+              <th>전망 가격</th><th>예측 근거 및 주요 요인</th>
+              <th>전망 가격</th><th>예측 근거 및 주요 요인</th>
+              <th>전망 가격</th><th>예측 근거 및 주요 요인</th>
+            </tr>
+          </thead>
+          <tbody id="scnBody"></tbody>
+        </table>
       </div>
-      <table>
-        <thead><tr><th style="width:14%">대상월</th><th style="width:20%">전망 가격</th><th>예측 근거 · 주요 요인</th></tr></thead>
-        <tbody id="rationaleBody"></tbody>
-      </table>
       <div class="src">거시(DXY ${fmtNum(d.macro?.dxy)} · 美10Y ${fmtNum(d.macro?.us10y)}% · USD/CNY ${fmtNum(d.macro?.usdcny)} · USD/KRW ${fmtNum(d.macro?.usdkrw)}) 기준 · AI 생성</div>
     </div>`;
 
@@ -222,19 +230,12 @@ function render() {
     document.querySelectorAll("#rangeRow button").forEach((x) => x.classList.toggle("on", x === b));
     drawMainChart();
   });
-  document.getElementById("rnRow").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-rn]");
-    if (!b) return;
-    state.rn = b.dataset.rn;
-    document.querySelectorAll("#rnRow button").forEach((x) => x.classList.toggle("on", x === b));
-    renderRationale(f, sign);
-  });
 
   drawMainChart();
   renderMetrics(f);
   renderScenarios(f);
   renderAnalogs(f, sign);
-  renderRationale(f, sign);
+  renderScenarioTable(f, sign);
 }
 
 /* ---------- 메인 차트 ---------- */
@@ -463,23 +464,28 @@ function drawMini(i, a, curMonthly, curBase) {
   });
 }
 
-/* ---------- 근거 표 (기본/낙관/비관) ---------- */
-function renderRationale(f, sign) {
-  const body = document.getElementById("rationaleBody");
-  const scn = state.rn || "base";
-  const list = f["monthly_forecast_" + scn] || f.monthly_forecast_base || [];
-  const fallback = {
-    base: "매크로 및 원자재 스프레드 변동에 따라 조정될 전망",
-    bull: "상방 리스크(공급 차질·수요 서프라이즈) 현실화 시의 경로",
-    bear: "하방 리스크(수요 둔화·재고 증가) 현실화 시의 경로",
-  }[scn];
-  const cls = { base: "secondary", bull: "danger", bear: "success" }[scn] || "secondary";
-  body.innerHTML = list
+/* ---------- 6개월 가격 시나리오 표 (대상월 | 기본 | 낙관 | 비관) ---------- */
+function renderScenarioTable(f, sign) {
+  const body = document.getElementById("scnBody");
+  const base = f.monthly_forecast_base || [];
+  const bull = f.monthly_forecast_bull || [];
+  const bear = f.monthly_forecast_bear || [];
+  const fb = {
+    base: "매크로·수급 변동에 따른 기준 경로",
+    bull: "상방 리스크(공급 차질·수요 서프라이즈) 현실화 시",
+    bear: "하방 리스크(수요 둔화·재고 증가) 현실화 시",
+  };
+  const cell = (r, k) =>
+    `<td class="mono">${r && r.price != null ? sign + fmtNum(r.price) : "—"}</td>
+     <td class="why">${escapeHtml((r && r.rationale) || fb[k])}</td>`;
+
+  body.innerHTML = base
     .map(
-      (r) => `<tr>
-        <td class="m"><span class="badge ${cls}">${escapeHtml(r.month || "")} (E)</span></td>
-        <td class="mono">${sign}${fmtNum(r.price)}</td>
-        <td>${escapeHtml(r.rationale || fallback)}</td>
+      (b, i) => `<tr>
+        <td class="col-month"><span class="badge secondary">${escapeHtml(b.month || "")} (E)</span></td>
+        ${cell(b, "base")}
+        ${cell(bull[i], "bull")}
+        ${cell(bear[i], "bear")}
       </tr>`
     )
     .join("");

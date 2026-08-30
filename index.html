@@ -153,10 +153,25 @@
     .error { color: var(--up); }
     .src { color: var(--muted); font-size: 11px; margin-top: 8px; }
 
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; margin-bottom: 16px; }
     .two-col > .block { display: flex; flex-direction: column; margin-bottom: 0; }
     @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
     #scenarios, #analogs { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+
+    /* 6개월 가격 시나리오 표 (7열, 2행 헤더) */
+    .tbl-scroll { overflow-x: auto; }
+    .scn-table { min-width: 780px; border-collapse: collapse; }
+    .scn-table th, .scn-table td {
+      border: 1px solid var(--line); padding: 7px 9px; text-align: left; vertical-align: top;
+    }
+    .scn-table thead th { text-align: center; color: var(--muted); font-weight: 600; font-size: 11px; background: var(--panel-2); }
+    .scn-table th.grp { font-size: 12px; }
+    .scn-table th.grp.base { color: var(--amber); }
+    .scn-table th.grp.bull { color: var(--up); }
+    .scn-table th.grp.bear { color: var(--down); }
+    .scn-table .col-month { white-space: nowrap; width: 92px; }
+    .scn-table td.mono { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 600; width: 84px; color: var(--text); }
+    .scn-table td.why { color: var(--muted); font-size: 12px; line-height: 1.45; min-width: 150px; }
 
     .toast {
       position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
