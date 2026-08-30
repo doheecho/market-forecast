@@ -20,11 +20,12 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
-# 모델: 환경변수로 재정의 가능. 앞에서부터 순서대로 시도.
+# 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
+# lite 를 먼저 — 가장 빠르고 thinking 지연이 없다.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
+    "gemini-flash-lite-latest",
     "gemini-flash-latest",
     "gemini-2.5-flash",
-    "gemini-flash-lite-latest",
 ]
 
 try:
@@ -62,7 +63,7 @@ print("[진행] 야후 파이낸스 시계열 수집 중… (10개 티커 일괄
 # yf.download 한 번으로 10개 티커를 병렬 수집한다.
 _dl = yf.download(
     list(TICKERS.values()),
-    period="10y", interval="1d",
+    period="6y", interval="1d",
     auto_adjust=True, progress=False, threads=True, group_by="column",
 )
 try:
@@ -232,13 +233,15 @@ def call_gemini(text: str) -> str:
             try:
                 print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
+                    cfg = {
+                        "response_mime_type": "application/json",
+                        "automatic_function_calling": {"disable": True},  # AFC 경고 억제
+                    }
+                    if "2.5" in model or "gemini-3" in model:
+                        cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
                     r = _client.models.generate_content(
                         model=model, contents=text,
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            # 함수호출 미사용 → AFC 경고 억제
-                            automatic_function_calling={"disable": True},
-                        ),
+                        config=types.GenerateContentConfig(**cfg),
                     )
                     return r.text
                 m = _legacy.GenerativeModel(model)
