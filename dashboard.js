@@ -49,6 +49,27 @@ function setAsOf(d) {
   document.getElementById("asOf").textContent =
     px && fc && px !== fc ? `시세 ${px} · 전망 ${fc}`
     : `기준일 ${fc || px || "—"}`;
+  setProvenance(d);
+}
+
+/* 출처·갱신 스트립 (전문 통계 사이트처럼 데이터 출처를 항상 노출) */
+function setProvenance(d) {
+  const el = document.getElementById("provenance");
+  if (!el) return;
+  const px = (d && d.prices_date) || "—";
+  const fc = (d && d.update_date) || "—";
+  const S = '<span class="sep">·</span>';
+  el.innerHTML =
+    `시세 <b>Yahoo Finance</b> 원자재 선물${S}니켈·아연 <b>LME</b>(수동 입력)${S}매크로 4종(DXY·美10Y·USD/CNY·USD/KRW)` +
+    `<br>6개월 전망 <b>Google Gemini</b> 생성 + 규칙 기반 보정(이상치·월라벨·스프레드)${S}` +
+    `과거 유사국면은 실거래 가격곡선 유사도 탐색` +
+    `<br>최종 갱신 — 시세 <b>${px}</b>${S}전망 <b>${fc}</b> (KST)`;
+  el.hidden = false;
+}
+
+/* 화면 표시용: ASCII 하이픈(-) → 진짜 마이너스(−) 로 치환 */
+function fmtSign(s) {
+  return String(s == null ? "" : s).replace(/-/g, "−");
 }
 document.getElementById("rerunBtn").addEventListener("click", rerunAnalysis);
 
@@ -205,7 +226,7 @@ function render() {
       </div>
       <div class="card">
         <div class="label">6개월 후 AI 가격전망</div>
-        <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(rateStr)}</span></div>
+        <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(fmtSign(rateStr))}</span></div>
         <div class="sub">기준 시나리오 (Base)</div>
       </div>
       <div class="card">
@@ -534,8 +555,8 @@ function renderAnalogs(f, sign, rateStr) {
       <p class="summary">${escapeHtml(a.summary || "")}</p>
       <div class="mini-box"><canvas id="mini0"></canvas></div>
       <div class="foot">
-        <span class="kv"><small>이 국면 이후 6개월 실제</small><b>${escapeHtml(past)}</b></span>
-        <span class="kv" style="text-align:right"><small>현재 모델 6개월 전망</small><b>${escapeHtml(now)}</b></span>
+        <span class="kv"><small>이 국면 이후 6개월 실제</small><b>${escapeHtml(fmtSign(past))}</b></span>
+        <span class="kv" style="text-align:right"><small>현재 모델 6개월 전망</small><b>${escapeHtml(fmtSign(now))}</b></span>
       </div>
     </div>`;
 
