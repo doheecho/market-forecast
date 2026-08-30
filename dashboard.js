@@ -216,7 +216,7 @@ function render() {
     </div>
 
     <div class="block">
-      <h3>가격 추이 · 6개월 전망 (Base / Bull / Bear)</h3>
+      <h3>원자재 가격추이 및 전망</h3>
       <div class="ctl-row" id="rangeRow">
         <span class="ctl-lbl">실적 기간</span>
         ${RANGES.map(([lbl, m]) => `<button data-m="${m}"${m === state.months ? ' class="on"' : ""}>${rangeText(lbl)}</button>`).join("")}
@@ -538,7 +538,7 @@ function renderAnalogs(f, sign, rateStr) {
 
   const curMonthly = monthlyCloses(historyRows(state.key));
   const curBase = (f.monthly_forecast_base || []).map((r) => Number(r.price)).filter(Number.isFinite);
-  drawMini(0, a, curMonthly, curBase);
+  drawMini(0, a, curMonthly, curBase, win);
 }
 
 /* 일/주봉 시계열 → 월별 마지막 종가 배열 */
@@ -549,9 +549,9 @@ function monthlyCloses(rows) {
 }
 
 /* 과거 유사국면과 현재를 같은 평면에 정규화(첫 값=100)해서 겹쳐 본다.
-   - 과거 실적(하늘색) / 과거 이후 실제(초록 점선)
-   - 현재 실적(자홍) / 현재 전망(보라 점선)  ← 과거와 같은 구간 길이로 정렬 */
-function drawMini(i, a, curMonthly, curBase) {
+   - 분석기간 실적(하늘색 실선) / 분석기간 후 6개월 추이(초록 실선) ← 둘 다 실적이라 실선
+   - 최근 실적(자홍 실선) / 향후 6개월 전망(보라 점선) ← 미래만 점선 */
+function drawMini(i, a, curMonthly, curBase, win) {
   const cid = "mini" + i;
   if (state.charts[cid]) { try { state.charts[cid].destroy(); } catch (_) {} delete state.charts[cid]; }
   const pastH = (a.miniHist || []).map(Number).filter(Number.isFinite);
@@ -581,10 +581,10 @@ function drawMini(i, a, curMonthly, curBase) {
     data: {
       labels,
       datasets: [
-        { label: "과거 실적", data: pastHistN, borderColor: "#22d3ee", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
-        { label: "과거 이후 실제", data: pastForeN, borderColor: "#22c55e", borderWidth: 1.6, borderDash: [4, 3], pointRadius: 0, tension: 0.3 },
-        { label: "현재 실적", data: curHistN, borderColor: "#e879f9", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
-        { label: "현재 전망", data: curForeN, borderColor: "#a855f7", borderWidth: 1.6, borderDash: [4, 3], pointRadius: 0, tension: 0.3 },
+        { label: "분석기간 실적", data: pastHistN, borderColor: "#22d3ee", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+        { label: "분석기간 후 6개월 추이", data: pastForeN, borderColor: "#22c55e", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+        { label: win === 6 ? "최근 6개월간 실적" : "최근 1년간 실적", data: curHistN, borderColor: "#e879f9", borderWidth: 1.6, pointRadius: 0, tension: 0.3 },
+        { label: "향후 6개월 전망", data: curForeN, borderColor: "#a855f7", borderWidth: 1.6, borderDash: [4, 3], pointRadius: 0, tension: 0.3 },
       ],
     },
     options: {
