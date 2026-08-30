@@ -22,12 +22,14 @@ try:
 except Exception:  # noqa: BLE001
     doc = {}
 
-# 야후에 없는 품목: manual/<key>.csv 우선, 없으면 직전 파일값 보존(니켈·아연·텅스텐).
+# 이번 수집에서 특정 품목이 비어 있으면(야후 간헐 실패 등) 직전 파일값을 보존한다.
+# 야후에 아예 없는 품목(니켈·아연·텅스텐)도 같은 경로로 이어짐.
 manual = load_manual_history()
 prev_hist = doc.get("history_3y") or {}
 for k, rows in prev_hist.items():
-    if k not in history and rows:
+    if not history.get(k) and rows:
         history[k] = rows
+        print(f"[경고] {k}: 이번 수집 0행 → 직전 파일값 {len(rows)}행 보존")
 for k, rows in manual.items():
     history[k] = rows
 

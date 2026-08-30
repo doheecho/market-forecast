@@ -55,6 +55,17 @@ for _k, _rows in load_manual_history().items():
     if _k not in COMMODITIES:
         COMMODITIES.append(_k)
 
+# 이번 수집에서 비어 버린 품목(야후 간헐 실패)은 직전 파일값으로 되살린다.
+try:
+    _prev = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
+    for _k in COMMODITIES:
+        if not history.get(_k) and _prev.get(_k):
+            history[_k] = _prev[_k]
+            spot[_k] = _prev[_k][-1]["price"]
+            print(f"[경고] {_k}: 이번 수집 0행 → 직전 파일값 {len(_prev[_k])}행 보존")
+except Exception:  # noqa: BLE001
+    pass
+
 # AI 프롬프트용 다운샘플 (~70 포인트, 토큰·지연 절약)
 history_brief = {}
 for k, rows in history.items():

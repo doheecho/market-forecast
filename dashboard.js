@@ -335,12 +335,21 @@ function drawMainChart() {
   const f = state.data.forecast_data[state.key];
   const sign = currencySign(f.unit);
   let hist = historyRows(state.key);
+  const hadHistory = hist.length > 0;
   if (state.months > 0 && hist.length) {
     const last = new Date(hist[hist.length - 1].date).getTime();
     const cut = last - state.months * 30.4 * 864e5;
     hist = hist.filter((r) => new Date(r.date).getTime() >= cut);
   }
-  if (!hist.length) return;
+  if (!hist.length) {
+    const box = document.querySelector(".chart-box");
+    if (box) box.innerHTML =
+      `<div class="error" style="height:100%;display:flex;align-items:center;justify-content:center">` +
+      (hadHistory ? "선택 기간에 실적 데이터가 없습니다" :
+        "실적 시계열 수집 실패 — 다음 데이터 갱신 때 복구됩니다 (전망값은 상단 참고)") +
+      `</div>`;
+    return;
+  }
 
   // 마지막 실적점 = 상단 KPI 현재가(state._spot)와 동일하게 강제
   const spot = state._spot != null ? state._spot : hist[hist.length - 1].price;
