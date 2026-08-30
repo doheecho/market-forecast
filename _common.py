@@ -9,9 +9,12 @@ import yfinance as yf
 TICKERS = {
     "copper": "HG=F", "aluminum": "ALI=F", "wti": "CL=F",
     "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F",
+    "steel": "HRC=F", "ironore": "TIO=F",
     "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
 }
-COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum"]
+# 야후에서 받는 원자재 (KOMIS 등 다른 소스는 komis.py 가 뒤에 append)
+YF_COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum", "steel", "ironore"]
+COMMODITIES = list(YF_COMMODITIES)  # 파이프라인이 참조하는 전체 목록 (확장 가능)
 
 # name, unit, 가격 배수(야후 원값 → 표기 단위)
 META = {
@@ -21,12 +24,18 @@ META = {
     "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
     "silver": ("은 (LBMA)", "US￠/oz.t", 100.0),        # SI=F: USD/oz → US¢/oz
     "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
+    "steel": ("열연강판 (CME HRC)", "USD/s.ton", 1.0),  # 냉연 SPCC 아님 — 방향성 참고
+    "ironore": ("철광석 62%Fe (CFR China)", "USD/dmt", 1.0),
+    # KOMIS 소스(선택) — komis.py 가 활성화되면 사용
+    "nickel": ("니켈 (KOMIS)", "USD/ton", 1.0),
+    "zinc": ("아연 (KOMIS)", "USD/ton", 1.0),
+    "tungsten": ("텅스텐 APT (KOMIS)", "USD/mtu", 1.0),
 }
 
 
 def fetch_raw() -> dict[str, pd.Series]:
-    """10개 티커 6년 일봉 종가를 yf.download 한 번으로 병렬 수집."""
-    print("[진행] 야후 파이낸스 시계열 수집 중… (10개 티커 일괄)")
+    """야후 티커 6년 일봉 종가를 yf.download 한 번으로 병렬 수집."""
+    print(f"[진행] 야후 파이낸스 시계열 수집 중… ({len(TICKERS)}개 티커 일괄)")
     dl = yf.download(
         list(TICKERS.values()), period="6y", interval="1d",
         auto_adjust=True, progress=False, threads=True, group_by="column",

@@ -25,6 +25,11 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - name: KOMIS (니켈·아연·텅스텐, 키 없으면 자동 skip)
+        env:
+          KOMIS_API_KEY: ${{ secrets.KOMIS_API_KEY }}
+        run: python komis.py || true
+
       - name: Generate forecast
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

@@ -1,5 +1,5 @@
 /* 원자재 시황 대시보드
- * raw_materials_forecast.json (analyze.py 산출물) 을 로드해 6대 원자재별로
+ * raw_materials_forecast.json (analyze.py 산출물) 을 로드해 원자재별로
  * KPI · 메인 차트(실적+6개월 전망 팬) · 요인지표 · 시나리오 · 과거 유사국면 · 근거표를 렌더.
  */
 "use strict";
@@ -11,10 +11,12 @@ const JSON_RAW =
 // 배포한 Cloudflare Worker 주소 (proxy/). 비우면 "AI 분석 갱신" 은 데이터 재조회만 함.
 const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
 
-const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum"];
+const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum",
+  "steel", "ironore", "nickel", "zinc", "tungsten"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
   gold: "금", silver: "은", platinum: "백금",
+  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
 };
 const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],

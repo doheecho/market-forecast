@@ -47,6 +47,18 @@ history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
+# 다른 소스(KOMIS: 니켈·아연·텅스텐)가 이미 파일에 넣어둔 시세를 이어붙인다.
+try:
+    _prev_hist = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
+    for _k, _rows in _prev_hist.items():
+        if _k not in COMMODITIES and _rows and _k in META:
+            history[_k] = _rows
+            spot[_k] = _rows[-1]["price"]
+            COMMODITIES.append(_k)
+            print(f"[진행] 외부 소스 시세 병합: {_k} ({len(_rows)}행)")
+except Exception:  # noqa: BLE001
+    pass
+
 # AI 프롬프트용 다운샘플 (~70 포인트, 토큰·지연 절약)
 history_brief = {}
 for k, rows in history.items():
@@ -140,6 +152,22 @@ FACTORS = {
                 "마이크로: 남아공(세계 70%) 전력공급(로드셰딩)·임금협상·파업, 러시아 팔라듐 대체(스위칭) 수요, "
                 "자동차 촉매(가솔린 삼원촉매) 로딩량, 수소 연료전지·전해조 수요, WPIC 수급수지, "
                 "지상재고(ETF·거래소), 팔라듐-백금 스프레드",
+    "steel": "매크로: 중국 부동산·인프라 투자, 글로벌 제조업/건설 PMI, 달러·위안화, 각국 관세·반덤핑(美 232조, EU CBAM). "
+             "마이크로: 철광석·원료탄(코킹콜) 가격, 中 조강생산 통제·감산 지침, 중국 철강 수출량·수출증치세 환급, "
+             "美 중서부 HRC 스프레드, 전기로 vs 고로 가동률, 자동차·가전·조선 수요, 유통재고·리드타임, "
+             "우리회사 관점: 시스템 Frame/Bracket 및 협력사 판금 가공품(SPCC 냉연) 단가에 후행 반영",
+    "ironore": "매크로: 중국 GDP·부동산 신규착공·특별채 발행, 달러 방향성, 해상운임(BDI). "
+               "마이크로: 호주·브라질(Vale·Rio·BHP·FMG) 출하량·기상(사이클론)·광산사고, 중국 항구 철광석 재고(45개항), "
+               "고로 가동률·철강 마진, 스크랩 상대가격, 62%Fe vs 65%/58% 품위 스프레드, 다롄상품거래소 투기 포지션",
+    "nickel": "매크로: 스테인리스 수요(중국 300계열), EV 배터리(하이니켈 NCM) 채용률, 달러·금리. "
+              "마이크로: 인도네시아 광석·NPI·MHP 증설 및 수출정책(RKAB 쿼터), LME 재고·중국 보세재고, "
+              "1급(class1) vs 2급 니켈 스프레드, 청산니켈 전환량, 인니 로열티·수출세",
+    "zinc": "매크로: 글로벌 건설·인프라(아연도금 강재) 수요, 달러·중국 경기. "
+            "마이크로: 광산 정광 공급(TC 제련수수료 방향), LME/SHFE 재고·캔슬드워런트, 주요 제련소 감산/정비, "
+            "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
+    "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공 수요. "
+                "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
+                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
 }
 
 SCHEMA_ONE = """{
@@ -157,8 +185,14 @@ SCHEMA_ONE = """{
     "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ]
 }"""
 
+_KEYS_STR = ", ".join(COMMODITIES)
+_SCHEMA_KEYS = ", ".join(
+    f'"{k}": {SCHEMA_ONE}' if k == COMMODITIES[0] else f'"{k}": {{...}}'
+    for k in COMMODITIES
+)
+
 prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
-아래 시장 입력 데이터를 바탕으로 6대 원자재(wti, copper, aluminum, gold, silver, platinum)의
+아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의
 6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
 규칙:
@@ -192,19 +226,22 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - 알루미늄은 주로 시스템의 Frame, Bracket류 등 외장부품에 많이 사용됨
 - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
 - 백금은 단결정(Single Crystal)의 생산과정에 설비에 사용되고 우리에게 직접 영향이 있지는 않음
-- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
+- 열연강판(steel)/철광석(ironore)은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의
+  상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
+- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t,
+  steel USD/s.ton, ironore USD/dmt.
 
 [실제 과거 유사국면 (실거래 데이터에서 상관분석으로 탐색됨)]
 {json.dumps(analogs_real, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
-{chr(10).join(f"- {k}: {v}" for k, v in FACTORS.items())}
+{chr(10).join(f"- {k}: {FACTORS[k]}" for k in COMMODITIES if k in FACTORS)}
 
 [시장 입력 데이터]
 {json.dumps(market_input, ensure_ascii=False)}
 
 응답 스키마 (commodities 의 각 값은 아래 형태, name/unit 은 원자재에 맞게):
-{{ "update_date": "{update_date}", "commodities": {{ "wti": {SCHEMA_ONE}, "copper": {{...}}, "aluminum": {{...}}, "gold": {{...}}, "silver": {{...}}, "platinum": {{...}} }} }}
+{{ "update_date": "{update_date}", "commodities": {{ {_SCHEMA_KEYS} }} }}
 """
 
 
