@@ -171,10 +171,15 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
   아래 '실제 과거 유사국면' 값을 그대로 복사하세요(임의 생성 금지).
   title(그 시기 실제 사건명)·summary 만 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
-  우리회사는 초음파 진단기기의 시스템,프로브(트랜스듀서)를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
+  우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
   원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
   가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
+- WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 커버류 (레진 소재), PE Foam/Pad 같은 포장재/비닐류의 영향이 큼
+- 구리의 경우 프로브용 Raw Cable, 시스템용 일반 Cable (HDMI, BD to BD 등), Heatsink 등에 영향
+- 알루미늄은 주로 시스템의 Frame, Bracket류 등 외장부품에 많이 사용됨
+- 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
+- 백금은 단결정(Single Crystal)의 생산과정에 설비에 사용되고 우리에게 직접 영향이 있지는 않음
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
 
 [실제 과거 유사국면 (실거래 데이터에서 상관분석으로 탐색됨)]
@@ -293,6 +298,25 @@ def sanitize_scenarios(commodities: dict) -> None:
         c["forecast_change_rate"] = f"{(last / cur - 1) * 100:+.1f}%"
 
 
+def fix_months(commodities: dict) -> None:
+    """AI 가 월 라벨을 어긋나게(순서 뒤섞임·과거월) 내는 경우가 있어,
+    update_date 다음 달부터 연속 6개월로 강제하고 배열은 6개로 자른다."""
+    y, m, _ = (int(x) for x in update_date.split("-"))
+    seq = []
+    for _ in range(6):
+        m += 1
+        if m > 12:
+            m, y = 1, y + 1
+        seq.append(f"{y:04d}-{m:02d}")
+    for k in COMMODITIES:
+        c = commodities.get(k) or {}
+        for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
+            rows = (c.get(arr) or [])[:6]
+            for i, r in enumerate(rows):
+                r["month"] = seq[i]
+            c[arr] = rows
+
+
 def validate(commodities: dict) -> None:
     need = {"name", "unit", "current_price", "forecast_6m_target",
             "monthly_forecast_base", "rationale_base"}
@@ -332,6 +356,7 @@ try:
     parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
     validate(commodities)
+    fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
     clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
     sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
 except Exception as e:  # noqa: BLE001

@@ -107,9 +107,13 @@
     .chart-box { position: relative; height: 340px; width: 100%; }
     .mini-box { position: relative; height: 150px; width: 100%; margin: 4px 0 8px; }
 
+    /* 요인지표: 4칸 그리드, 넘치면 아랫줄로 (가로 스크롤 없음) */
+    #metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    @media (max-width: 900px) { #metrics { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 560px) { #metrics { grid-template-columns: 1fr; } }
     .scroll-x { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
     .metric {
-      flex: none; width: 216px; border: 1px solid var(--line); border-radius: 8px;
+      border: 1px solid var(--line); border-radius: 8px; min-width: 0;
       padding: 11px 12px; background: var(--panel-2);
     }
     .metric .top { display: flex; justify-content: space-between; align-items: start; gap: 6px; margin-bottom: 8px; }

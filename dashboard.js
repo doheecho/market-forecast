@@ -303,7 +303,17 @@ function drawMainChart() {
   // 마지막 실적점 = 상단 KPI 현재가(state._spot)와 동일하게 강제
   const spot = state._spot != null ? state._spot : hist[hist.length - 1].price;
   const anchorX = hist[hist.length - 1].date;
-  const fcX = (f.monthly_forecast_base || []).map((r) => r.month + "-15");
+  // 전망 월 라벨: 마지막 실적일 이후만, 오름차순 정렬 + 중복 제거 (AI 월 꼬임 방어)
+  const anchorMs = new Date(anchorX).getTime();
+  const fcMonths = [...new Set((f.monthly_forecast_base || []).map((r) => r.month))]
+    .filter((m) => new Date(m + "-15").getTime() > anchorMs)
+    .sort();
+  const fcX = fcMonths.map((m) => m + "-15");
+  const priceByMonth = (arr) => {
+    const m = new Map();
+    for (const r of arr || []) if (!m.has(r.month)) m.set(r.month, Number(r.price));
+    return m;
+  };
 
   // 4개 데이터셋 모두 같은 x 격자(실적일들 + 전망월들). 겹치지 않는 구간은 null → 툴팁에서 제외.
   const pT = (r, i, isLast) => ({ x: r.date, y: isLast ? spot : r.price });
@@ -311,9 +321,12 @@ function drawMainChart() {
     .map((r, i) => pT(r, i, i === hist.length - 1))
     .concat(fcX.map((x) => ({ x, y: null })));
 
-  const line = (arr) =>
-    hist.map((r, i) => ({ x: r.date, y: i === hist.length - 1 ? spot : null }))
-      .concat((arr || []).map((r, i) => ({ x: fcX[i], y: r.price })));
+  const line = (arr) => {
+    const by = priceByMonth(arr);
+    return hist
+      .map((r, i) => ({ x: r.date, y: i === hist.length - 1 ? spot : null }))
+      .concat(fcMonths.map((m, i) => ({ x: fcX[i], y: by.has(m) ? by.get(m) : null })));
+  };
 
   const ds = [
     {
@@ -524,9 +537,19 @@ function drawMini(i, a, curMonthly, curBase) {
 /* ---------- 6개월 가격 시나리오 표 (대상월 | 기본 | 낙관 | 비관) ---------- */
 function renderScenarioTable(f, sign) {
   const body = document.getElementById("scnBody");
-  const base = f.monthly_forecast_base || [];
-  const bull = f.monthly_forecast_bull || [];
-  const bear = f.monthly_forecast_bear || [];
+  const ym = new Date().toISOString().slice(0, 7);
+  const bySort = (a) =>
+    [...(a || [])]
+      .filter((r) => String(r.month) >= ym)              // 과거월 라벨 방어
+      .sort((x, y) => String(x.month).localeCompare(String(y.month)));
+  const base = bySort(f.monthly_forecast_base);
+  const bMon = base.map((r) => r.month);
+  const idx = (a) => {
+    const m = new Map((a || []).map((r) => [r.month, r]));
+    return bMon.map((mm) => m.get(mm) || null);
+  };
+  const bull = idx(f.monthly_forecast_bull);
+  const bear = idx(f.monthly_forecast_bear);
   const fb = {
     base: "매크로·수급 변동에 따른 기준 경로",
     bull: "상방 리스크(공급 차질·수요 서프라이즈) 현실화 시",
