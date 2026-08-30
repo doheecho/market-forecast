@@ -31,7 +31,7 @@ const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
 
-const state = { data: null, key: "wti", months: 12, analogIdx: 0, analogWin: 12, charts: {} };
+const state = { data: null, key: "wti", months: 12, analogIdx: 0, analogWin: 6, charts: {} };
 
 /* ---------- 부트스트랩 ---------- */
 if (window.Chart) {
@@ -475,7 +475,7 @@ function renderAnalogs(f, sign, rateStr) {
   const h3 = document.querySelector("#analogBlock h3");
   const has12 = (f.analogs || []).length;
   const has6 = (f.analogs_6m || []).length;
-  // 선택한 비교창에 데이터가 없으면 있는 쪽으로 자동 전환
+  // 선택한 비교창에 데이터가 없으면 데이터 있는 쪽으로 자동 전환
   if (state.analogWin === 6 && !has6 && has12) state.analogWin = 12;
   if (state.analogWin === 12 && !has12 && has6) state.analogWin = 6;
   const win = state.analogWin === 6 ? 6 : 12;
@@ -484,13 +484,16 @@ function renderAnalogs(f, sign, rateStr) {
   const idx = Math.min(Math.max(state.analogIdx || 0, 0), Math.max(list.length - 1, 0));
   state.analogIdx = idx;
 
-  // 헤더: 좌(제목 + 1년/6개월) · 우(①②③)
+  // 헤더: 좌(제목 + 6개월/1년 · 데이터 없는 창은 비활성) · 우(①②③)
   if (h3) {
+    const wbtn = (w, label, has) =>
+      `<button data-w="${w}"${win === w ? ' class="on"' : has ? "" : ' class="off"'}` +
+      `${has ? "" : " disabled"}>${label}</button>`;
     h3.innerHTML =
       `<span class="ana-h-left">과거 유사 국면` +
       `<span class="ana-win">` +
-      `<button data-w="12"${win === 12 ? ' class="on"' : ""}>1년</button>` +
-      `<button data-w="6"${win === 6 ? ' class="on"' : ""}>6개월</button>` +
+      wbtn(6, "6개월", has6) +
+      wbtn(12, "1년", has12) +
       `</span></span>` +
       (list.length > 1
         ? `<span class="analog-nav">` +
@@ -501,7 +504,7 @@ function renderAnalogs(f, sign, rateStr) {
         : "");
     h3.querySelector(".ana-win").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-w]");
-      if (!b || +b.dataset.w === win) return;
+      if (!b || b.disabled || +b.dataset.w === win) return;
       state.analogWin = +b.dataset.w;
       state.analogIdx = 0;
       renderAnalogs(f, sign, rateStr);
