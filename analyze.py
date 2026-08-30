@@ -244,28 +244,37 @@ def sanitize_scenarios(commodities: dict) -> None:
         c["current_price"] = round(cur, 2)
 
         lo_abs, hi_abs = cur * 0.5, cur * 2.0
+
+        # 1) base 경로: 튐만 제한, 모양은 유지
         prev = cur
-        for i, row in enumerate(base):
+        for row in base:
             v = _n(row.get("price"), prev) or prev
-            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동은 ±30% 까지 허용(튐만 제한)
+            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동 ±30% 초과만 제한
             v = min(max(v, lo_abs), hi_abs)             # 극단 이상치만 클립
             row["price"] = round(v, 2)
             prev = v
 
+        # 2) bull/bear 스프레드: 뒤로 갈수록 '반드시' 벌어지게(단조 증가). 상·하방 비대칭은 유지.
+        base_sp, grow = 0.02, 0.024                     # 2% → 6개월차 약 14%
+        spu_prev = spd_prev = 0.0
+        for i, row in enumerate(base):
             b = row["price"]
             gu = _n((bull[i] or {}).get("price")) if i < len(bull) else None
             gd = _n((bear[i] or {}).get("price")) if i < len(bear) else None
-            floor_sp = 0.015 + 0.012 * i               # 최소 스프레드(1.5%→약 8%)
-            u = gu if (gu and gu > b) else b * (1 + floor_sp)
-            dn = gd if (gd and gd < b) else b * (1 - floor_sp)
-            u = max(u, b * (1 + floor_sp))             # 최소한은 벌어지게
-            dn = min(dn, b * (1 - floor_sp))
-            u = min(max(u, lo_abs), hi_abs * 1.15)
-            dn = min(max(dn, lo_abs * 0.85), hi_abs)
+            spu = base_sp + grow * i
+            spd = base_sp + grow * i
+            if gu and gu > b:                           # AI 가 더 넓게 봤으면 그만큼 반영
+                spu = max(spu, gu / b - 1)
+            if gd and gd < b:
+                spd = max(spd, 1 - gd / b)
+            # 매달 최소 1.2%p 는 더 벌어지게(단조 증가 + 실제로 '점점' 넓어지는 팬), 상한 50%
+            spu = min(max(spu, spu_prev + 0.012 if i else spu), 0.5)
+            spd = min(max(spd, spd_prev + 0.012 if i else spd), 0.5)
+            spu_prev, spd_prev = spu, spd
             if i < len(bull):
-                bull[i]["price"] = round(u, 2)
+                bull[i]["price"] = round(min(b * (1 + spu), hi_abs * 1.3), 2)
             if i < len(bear):
-                bear[i]["price"] = round(dn, 2)
+                bear[i]["price"] = round(max(b * (1 - spd), lo_abs * 0.7), 2)
 
         last = base[-1]["price"]
         c["forecast_6m_target"] = round(last, 2)

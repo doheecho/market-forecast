@@ -250,11 +250,21 @@ function render() {
     drawMainChart();
   });
 
-  drawMainChart();
-  renderMetrics(f);
-  renderScenarios(f);
-  renderAnalogs(f, sign, rateStr);
-  renderScenarioTable(f, sign);
+  // 한 섹션이 터져도 나머지는 그리도록 각각 격리
+  const safe = (name, fn) => {
+    try { fn(); } catch (e) {
+      console.error(`[render:${name}]`, e);
+      const box = { chart: "mainChart", metrics: "metrics", scenarios: "scenarios",
+        analogs: "analogs", table: "scnBody" }[name];
+      const el = box && document.getElementById(box);
+      if (el) el.innerHTML = `<div class="error" style="padding:16px">${name} 표시 오류: ${escapeHtml(String(e && e.message || e))}</div>`;
+    }
+  };
+  safe("chart", drawMainChart);
+  safe("metrics", () => renderMetrics(f));
+  safe("scenarios", () => renderScenarios(f));
+  safe("analogs", () => renderAnalogs(f, sign, rateStr));
+  safe("table", () => renderScenarioTable(f, sign));
 }
 
 /* ---------- 메인 차트 ---------- */
