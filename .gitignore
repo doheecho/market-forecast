@@ -3,4 +3,8 @@ __pycache__/
 .venv/
 venv/
 _site/
+_site
+.wrangler/
+proxy/.wrangler/
 .DS_Store
+node_modules/

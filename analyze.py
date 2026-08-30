@@ -187,7 +187,6 @@ SCHEMA_ONE = """{
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
   "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
     "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
-    "acc": "0%", "forecast": "+0.0%",
     "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ]
 }"""
 
@@ -202,7 +201,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
   label 에 지표명, val 에 최신 추정치와 단위를 넣으세요.
 - analogs 는 각 원자재당 1개. period/similarity/actual/miniHist/miniForecast 는
   아래 '실제 과거 유사국면' 값을 그대로 복사하세요(임의 생성 금지).
-  title(그 시기 실제 사건명)·summary·acc·forecast(당신의 현재 6개월 base 전망 변화율)만 채우세요.
+  title(그 시기 실제 사건명)·summary 만 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
 

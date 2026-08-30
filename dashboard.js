@@ -76,11 +76,17 @@ async function rerunAnalysis() {
         return;
       }
       toast("워크플로 트리거 실패 · 최신 데이터만 다시 불러옵니다");
-    } else {
-      toast("PROXY 미설정 · 최신 데이터만 다시 불러옵니다");
+      await load(true);
+      return;
     }
+    // PROXY 미설정: GitHub Actions 실행 페이지를 새 탭으로 열어준다
+    window.open(
+      "https://github.com/doheecho/market-forecast/actions/workflows/run.yml",
+      "_blank",
+      "noopener"
+    );
+    toast("GitHub Actions 에서 'Run workflow' 를 눌러 갱신하세요 (PROXY_BASE 설정 시 자동)", 5000);
     await load(true);
-    toast(state.data && state.data.update_date !== before ? "갱신됨" : "변경 없음");
   } finally {
     btn.disabled = false;
   }
@@ -351,9 +357,9 @@ function renderScenarios(f) {
   const row = (cls, head, txt) =>
     `<div class="scenario ${cls}"><div class="head">${head}</div><p>${escapeHtml(txt || "-")}</p></div>`;
   box.innerHTML =
-    row("base", "기본 (Base) · 50%", f.rationale_base) +
-    row("bull", "낙관 (Bull) · 25%", f.rationale_bull) +
-    row("bear", "비관 (Bear) · 25%", f.rationale_bear);
+    row("base", "기본 (Base)", f.rationale_base) +
+    row("bull", "낙관 (Bull)", f.rationale_bull) +
+    row("bear", "비관 (Bear)", f.rationale_bear);
 }
 
 /* ---------- 과거 유사 국면 ---------- */
@@ -365,21 +371,23 @@ function renderAnalogs(f, sign) {
     return;
   }
   box.innerHTML = list
-    .map(
-      (a, i) => `<div class="analog">
+    .map((a, i) => {
+      const past = a.actual != null && a.actual !== "" ? a.actual : "—";
+      const now = f.forecast_change_rate || "—";
+      return `<div class="analog">
         <div class="head">
           <span class="title">${escapeHtml(a.title || "유사 국면")}</span>
           <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
         </div>
-        <div class="period">분석 기간 ${escapeHtml(a.period || "-")}</div>
+        <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 월간 추이 상관도 기준</div>
         <p class="summary">${escapeHtml(a.summary || "")}</p>
         <div class="mini-box"><canvas id="mini${i}"></canvas></div>
         <div class="foot">
-          <span class="badge danger">전망 정확도 ${escapeHtml(a.acc || "-")}</span>
-          <span class="kv" style="text-align:right"><small>모델 전망 / 실제</small><b>${escapeHtml(a.forecast || "-")} / ${escapeHtml(a.actual || "-")}</b></span>
+          <span class="kv"><small>이 국면 이후 6개월 실제</small><b>${escapeHtml(past)}</b></span>
+          <span class="kv" style="text-align:right"><small>현재 모델 6개월 전망</small><b>${escapeHtml(now)}</b></span>
         </div>
-      </div>`
-    )
+      </div>`;
+    })
     .join("");
 
   const curMonthly = monthlyCloses(historyRows(state.key));

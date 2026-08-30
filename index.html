@@ -153,10 +153,10 @@
     .error { color: var(--up); }
     .src { color: var(--muted); font-size: 11px; margin-top: 8px; }
 
-    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: stretch; }
+    .two-col > .block { display: flex; flex-direction: column; margin-bottom: 0; }
     @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
-    #scenarios { display: flex; flex-direction: column; gap: 12px; }
-    #analogs { display: flex; flex-direction: column; gap: 12px; }
+    #scenarios, #analogs { display: flex; flex-direction: column; gap: 12px; flex: 1; }
 
     .toast {
       position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
