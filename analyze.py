@@ -1,184 +1,209 @@
+"""6대 핵심 원자재 AI 가격 전망 생성기.
+
+1. 야후 파이낸스에서 원자재 6종 + 매크로 4종의 시계열을 수집(최근 3년 일봉 + 그 이전 주봉)
+2. 요약본을 Gemini 에 전달해 6개월 월별 전망(base/bull/bear) · 시나리오 · 요인지표 ·
+   과거 유사국면을 JSON 으로 생성
+3. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
+"""
+from __future__ import annotations
+
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta
+
 import pandas as pd
 import yfinance as yf
 
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-  print("[에러] GEMINI_API_KEY가 설정되지 않았습니다.")
-  exit(1)
+API_KEY = os.environ.get("GEMINI_API_KEY")
+if not API_KEY:
+    sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
+
+# 모델: 환경변수로 재정의 가능. 앞에서부터 순서대로 시도.
+MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-flash-lite-latest",
+]
 
 try:
-  from google import genai
-  from google.genai import types
-  client = genai.Client(api_key=api_key)
-  use_new_sdk = True
+    from google import genai
+    from google.genai import types
+
+    _client = genai.Client(api_key=API_KEY)
+    _NEW_SDK = True
 except ImportError:
-  import google.generativeai as google_genai
-  google_genai.configure(api_key=api_key)
-  use_new_sdk = False
+    import google.generativeai as _legacy
+
+    _legacy.configure(api_key=API_KEY)
+    _NEW_SDK = False
 
 TICKERS = {
-    "copper": "HG=F",      "aluminum": "ALI=F",   "wti": "CL=F",
-    "gold": "GC=F",        "silver": "SI=F",      "platinum": "PL=F",
-    "dxy": "DX-Y.NYB",     "us10y": "^TNX",       "usdcny": "CNY=X",     "usdkrw": "KRW=X"
+    "copper": "HG=F", "aluminum": "ALI=F", "wti": "CL=F",
+    "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F",
+    "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
+}
+COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum"]
+
+# name, unit, 가격 배수(야후 원값 → 표기 단위)
+META = {
+    "wti": ("WTI 원유 (CME)", "USD/bbl", 1.0),
+    "copper": ("전기동 (LME)", "USD/ton", 2204.62),   # HG=F: USD/lb → USD/ton
+    "aluminum": ("알루미늄 (LME)", "USD/ton", 1.0),
+    "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
+    "silver": ("은 (LBMA)", "US￠/oz.t", 100.0),        # SI=F: USD/oz → US¢/oz
+    "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
 }
 
-print("[진행] 야후 파이낸스 10개년 입체 수집 중 (최근 3년 일간 '1d' + 과거 3~10년전 주간 '1wk')...")
-hist_data = {}
-today = datetime.now()
-three_y = today - timedelta(days=3*365)
-ten_y = today - timedelta(days=10*365)
 
-for name, ticker in TICKERS.items():
-  try:
-    df_d = yf.Ticker(ticker).history(start=three_y.strftime("%Y-%m-%d"), end=today.strftime("%Y-%m-%d"), interval="1d")["Close"]
-    df_w = yf.Ticker(ticker).history(start=ten_y.strftime("%Y-%m-%d"), end=three_y.strftime("%Y-%m-%d"), interval="1wk")["Close"]
-    df_m = pd.concat([df_w, df_d]).sort_index().dropna()
-    hist_data[name] = df_m
-  except Exception as e:
-    print(f"[경고] {name} 수집 실패: {e}")
-    hist_data[name] = pd.Series(dtype=float)
+def fetch_series(ticker: str) -> pd.Series:
+    """최근 3년은 일봉, 그 이전 7년은 주봉으로 이어붙인 종가 시계열."""
+    today = datetime.now()
+    d3 = today - timedelta(days=3 * 365)
+    d10 = today - timedelta(days=10 * 365)
+    try:
+        tk = yf.Ticker(ticker)
+        daily = tk.history(start=d3, end=today, interval="1d", auto_adjust=True)["Close"]
+        weekly = tk.history(start=d10, end=d3, interval="1wk", auto_adjust=True)["Close"]
+        s = pd.concat([weekly, daily]).sort_index()
+        s = s[~s.index.duplicated(keep="last")].dropna()
+        s.index = s.index.tz_localize(None)
+        return s
+    except Exception as e:  # noqa: BLE001
+        print(f"[경고] {ticker} 수집 실패: {e}")
+        return pd.Series(dtype=float)
 
-def generate_6_commodities_10y():
-  p_series = hist_data.get("copper", pd.Series())
-  if p_series.empty: p_series = hist_data.get("wti", pd.Series())
-  res = {k: [] for k in ["wti", "copper", "aluminum", "gold", "silver", "platinum"]}
-  for idx, val in p_series.items():
-    date_str = idx.strftime("%Y-%m-%d")
-    try: cop = float(val)
-    except: cop = 4.0
-    try: wti = float(hist_data["wti"].loc[idx]) if idx in hist_data["wti"].index else 75.0
-    except: wti = 75.0
-    try: alu = float(hist_data["aluminum"].loc[idx]) if idx in hist_data["aluminum"].index else 2200.0
-    except: alu = 2200.0
-    try: gold = float(hist_data["gold"].loc[idx]) if idx in hist_data["gold"].index else 2300.0
-    except: gold = 2300.0
-    try: sil = float(hist_data["silver"].loc[idx]) if idx in hist_data["silver"].index else 28.0
-    except: sil = 28.0
-    try: plat = float(hist_data["platinum"].loc[idx]) if idx in hist_data["platinum"].index else 1000.0
-    except: plat = 1000.0
 
-    res["wti"].append({"date": date_str, "price": round(wti, 2)})
-    res["copper"].append({"date": date_str, "price": round(cop * 2204.62, 1)})
-    res["aluminum"].append({"date": date_str, "price": round(alu, 1)})
-    # 오타 변수명 전수 수정 및 격파 완료!
-    res["gold"].append({"date": date_str, "price": round(gold, 2)})
-    res["silver"].append({"date": date_str, "price": round(sil, 2)})
-    res["platinum"].append({"date": date_str, "price": round(plat, 2)})
-  return res
+print("[진행] 야후 파이낸스 시계열 수집 중…")
+raw = {name: fetch_series(tk) for name, tk in TICKERS.items()}
 
-try:
-  res_daily = generate_6_commodities_10y()
-except Exception as e:
-  print(f"[경고] 10개년 병합 중 인덱스 편차 감지, 기본 월별 백업 매핑 가동: {e}")
-  res_daily = {k: [] for k in ["wti", "copper", "aluminum", "gold", "silver", "platinum"]}
-  for k in res_daily.keys():
-    df = hist_data.get(k, pd.Series())
-    for idx, val in df.items():
-      res_daily[k].append({"date": idx.strftime("%Y-%m-%d"), "price": round(float(val), 2)})
+# 원자재 6종을 하나의 타임라인으로 정렬 (가장 긴 시계열 기준, 결측은 직전값으로 보간)
+master = pd.Series(dtype=float)
+for k in COMMODITIES:
+    if len(raw[k]) > len(master):
+        master = raw[k]
+timeline = master.index
 
-summary_history = {}
-for k, v in res_daily.items():
-  step = max(1, len(v) // 60)
-  summary_history[k] = v[::step]
+history: dict[str, list[dict]] = {}
+for k in COMMODITIES:
+    mult = META[k][2]
+    s = raw[k].reindex(timeline).ffill().bfill()
+    history[k] = [
+        {"date": ts.strftime("%Y-%m-%d"), "price": round(float(v) * mult, 2)}
+        for ts, v in s.items()
+        if pd.notna(v)
+    ]
 
-market_summary_for_ai = {
-    "update_date": datetime.now().strftime("%Y-%m-%d"),
-    "macro": {
-        "dxy": round(float(hist_data["dxy"].iloc[-1]), 2) if not hist_data["dxy"].empty else 104.2,
-        "us10y": round(float(hist_data["us10y"].iloc[-1]), 2) if not hist_data["us10y"].empty else 4.15,
-        "usdcny": round(float(hist_data["usdcny"].iloc[-1]), 4) if not hist_data["usdcny"].empty else 7.23,
-        "usdkrw": round(float(hist_data["usdkrw"].iloc[-1]), 1) if not hist_data["usdkrw"].empty else 1380.0
-    },
-    "history_summary": summary_history
+if not any(history.values()):
+    sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
+
+# AI 프롬프트용 다운샘플 (~120 포인트)
+history_brief = {}
+for k, rows in history.items():
+    step = max(1, len(rows) // 120)
+    history_brief[k] = rows[::step]
+
+
+def last_val(name: str, default: float) -> float:
+    s = raw.get(name)
+    return round(float(s.iloc[-1]), 4) if s is not None and not s.empty else default
+
+
+update_date = datetime.now().strftime("%Y-%m-%d")
+macro = {
+    "dxy": last_val("dxy", 104.2),
+    "us10y": last_val("us10y", 4.15),
+    "usdcny": last_val("usdcny", 7.23),
+    "usdkrw": last_val("usdkrw", 1380.0),
 }
+market_input = {"update_date": update_date, "macro": macro, "history_summary": history_brief}
 
-prompt = f"""
-당신은 글로벌 원자재 및 거시경제 퀀트 분석 수석 애널리스트입니다.
-시장 입력 데이터를 참고하여, 6대 핵심 원자재 각각의 예측가와 시나리오, 요인지표(metrics), 과거 유사국면(analogs) 분석 데이터셋을 마크다운 없이 순수 JSON 포맷으로 작성하세요.
+SCHEMA_ONE = """{
+  "name": "WTI 원유 (CME)", "unit": "USD/bbl",
+  "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
+  "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
+  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 가격 산정 근거 한 문장"} ],
+  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0} ],
+  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0} ],
+  "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
+  "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
+  "analogs": [ {"period": "'20.11~'21.10", "similarity": "92%", "acc": "92%", "forecast": "+14.9%", "actual": "+3.8%",
+    "title": "역사적 사건 정성 제목", "summary": "국면 요약",
+    "miniHist": [12개 월 과거 가격], "miniForecast": [이후 6개 월 실제 가격]} ]
+}"""
 
-[요인지표(metrics) 및 과거 유사국면(analogs) 미니 3선 그래프 가이드]
-- Rationale(수급 요약)에는 공급 요인의 남아공 대정전 폭 확대와 수요 요인의 위안화 환율 상승이 가격을 지지하고 있습니다 처럼 영향도를 기재해 주세요.
-- 과거 유사국면(analogs): title(역사적 사건 정성 대제목 예: "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면"), period(연도 약식 포맷 예: "'20.11~'21.10"), miniHist(과거 12개 월 가격), miniForecast(과거 유사 시점 이후 실제 6개 월 가격)
-- monthly_forecast_base 내의 "rationale" 속성에는 각 월에 매칭되는 실제 AI 가격 산정 고유의 근거 텍스트 데이터를 작성하세요.
+prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
+아래 시장 입력 데이터를 바탕으로 6대 원자재(wti, copper, aluminum, gold, silver, platinum)의
+6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
+
+규칙:
+- monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
+- badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
+- metrics 3~5개, analogs 1~2개. miniHist 12개, miniForecast 6개 숫자.
+- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t.
 
 [시장 입력 데이터]
-{json.dumps(market_summary_for_ai, ensure_ascii=False)}
+{json.dumps(market_input, ensure_ascii=False)}
 
-마크다운 없이 순수 JSON 포맷으로만 응답하세요. 스키마:
-{{
-  "update_date": "{market_summary_for_ai['update_date']}",
-  "commodities": {{
-    "wti": {{ 
-      "name": "WTI 원유 (CME)", "unit": "USD/bbl", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, 
-      "planning_advisor": "Planning Advisor : [전략 문구]",
-      "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "9월 실질 수급 및 매크로 지표 변동에 따른 AI 정밀 산정 근거 데이터"}} ],
-      "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ],
-      "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ],
-      "rationale_base": "기본 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
-      "metrics": [ {{"label": "위안화 환율", "val": "6.72223 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"}} ],
-      "analogs": [
-        {{ "period": "'20.11~'21.10", "similarity": "92%", "acc": "92%", "forecast": "+14.9%", "actual": "+3.8%", "title": "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면", "summary": "공급 측면의 구리 TC 하락이...",
-          "miniHist": [51, 52, 55, 58, 61, 63, 65, 68, 72, 75, 80, 85], "miniForecast": [88, 90, 92, 94, 96, 98]
-        }}
-      ]
-    }},
-    "copper": {{ "name": "전기동 (LME)", "unit": "USD/ton", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, "planning_advisor": "Planning Advisor : [전략 문구]", "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "근거"}} ], "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ], "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ], "rationale_base": "기본", "rationale_bull": "낙관", "rationale_bear": "비관", "metrics": [ {{"label": "구리 TC", "val": "-227.5 (USD/mt)", "date": "2026.08.27", "cat": "공급", "status": "강세", "badge": "danger"}} ], "analogs": [ {{ "period": "'20.11~'21.10", "similarity": "92%", "acc": "92%", "forecast": "+14.9%", "actual": "+3.8%", "title": "남아공 제련소 차질 및 자동차 촉매 대체 수요 국면", "summary": "요약", "miniHist": [5000,5200,5400,5600,5800,6000,6200,6400,6600,6800,7000,7200], "miniForecast": [7400,7600,7800,8000,8200,8400] }} ] }},
-    "aluminum": {{ "name": "알루미늄 (LME)", "unit": "USD/ton", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, "planning_advisor": "Planning Advisor : [전략 문구]", "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "근거"}} ], "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ], "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ], "rationale_base": "기본", "rationale_bull": "낙관", "rationale_bear": "비관", "metrics": [ {{"label": "제련 전력비", "val": "142.5 (EUR/MWh)", "date": "2026.08.27", "cat": "공급", "status": "보통", "badge": "secondary"}} ], "analogs": [ {{ "period": "'16.09~'17.08", "similarity": "86%", "acc": "98%", "forecast": "+8.3%", "actual": "+8.2%", "title": "중국 인프라 투자 국면", "summary": "요약", "miniHist": [1800,1850,1900,1950,2000,2050,2100,2150,2200,2250,2300,2350], "miniForecast": [2400,2450,2500,2550,2600,2650] }} ] }},
-    "gold": {{ "name": "금 (LBMA)", "unit": "USD/oz.t", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, "planning_advisor": "Planning Advisor : [전략 문구]", "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "근거"}} ], "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ], "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ], "rationale_base": "기본", "rationale_bull": "낙관", "rationale_bear": "비관", "metrics": [ {{"label": "10년물 실질금리", "val": "1.85 (Percent)", "date": "2026.08.27", "cat": "투자", "status": "강세", "badge": "danger"}} ], "analogs": [ {{ "period": "'19.01~'19.12", "similarity": "88%", "acc": "95%", "forecast": "+11.5%", "actual": "+10.2%", "title": "연준 금리 동결 국면", "summary": "요약", "miniHist": [1200,1250,1300,1350,1400,1450,1500,1550,1600,1650,1700,1750], "miniForecast": [1800,1850,1900,1950,2000,2050] }} ] }},
-    "silver": {{ "name": "은 (LBMA)", "unit": "US￠/oz.t", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, "planning_advisor": "Planning Advisor : [전략 문구]", "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "근거"}} ], "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ], "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ], "rationale_base": "기본", "rationale_bull": "낙관", "rationale_bear": "비관", "metrics": [ {{"label": "태양광용 은 수요", "val": "4250 (TONNES)", "date": "2026.08.27", "cat": "수요", "status": "강세", "badge": "danger"}} ], "analogs": [ {{ "period": "'19.01~'19.12", "similarity": "88%", "acc": "95%", "forecast": "+11.5%", "actual": "+10.2%", "title": "태양광 전도체 수요 랠리 국면", "summary": "요약", "miniHist": [15,15.5,16,16.5,17,17.5,18,18.5,19,19.5,20,20.5], "miniForecast": [21,21.5,22,22.5,23,23.5] }} ] }},
-    "platinum": {{ "name": "백금 (CME)", "unit": "USD/oz.t", "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0, "planning_advisor": "Planning Advisor : [전략 문구]", "monthly_forecast_base": [ {{"month": "2026-09", "price": 0.0, "rationale": "근거"}} ], "monthly_forecast_bull": [ {{"month": "2026-09", "price": 0.0}} ], "monthly_forecast_bear": [ {{"month": "2026-09", "price": 0.0}} ], "rationale_base": "기본", "rationale_bull": "낙관", "rationale_bear": "비관", "metrics": [ {{"label": "남아공 광산 원가", "val": "보통 (Level)", "date": "2026.08.27", "cat": "공급", "status": "강세", "badge": "danger"}} ], "analogs": [ {{ "period": "'19.01~'19.12", "similarity": "88%", "acc": "95%", "forecast": "+11.5%", "actual": "+10.2%", "title": "남아공 대정전 및 노조 파업 국면", "summary": "요약", "miniHist": [800,830,850,880,900,920,950,980,1000,1020,1050,1080], "miniForecast": [1100,1120,1150,1180,1200,1220] }} ] }}
-  }}
-}}
+응답 스키마 (commodities 의 각 값은 아래 형태, name/unit 은 원자재에 맞게):
+{{ "update_date": "{update_date}", "commodities": {{ "wti": {SCHEMA_ONE}, "copper": {{...}}, "aluminum": {{...}}, "gold": {{...}}, "silver": {{...}}, "platinum": {{...}} }} }}
 """
 
-print("[진행] Gemini 다변량 퀀트 오버레이 패턴 매칭 분석 가동...")
-MODELS_TO_TRY = ["gemini-1.5-flash", "gemini-3.6-flash"]
-response = None
-last_exception = None
-success = False
 
-for model_name in MODELS_TO_TRY:
-  for attempt in range(1, 5):
-    try:
-      print(f"[진행] {model_name} 연산 시도 중 (시도 {attempt}회째)...")
-      if use_new_sdk:
-        response = client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
-      else:
-        model = google_genai.GenerativeModel(model_name)
-        response = model.generate_content(prompt, generation_config={"response_mime_type": "application/json"})
-      success = True
-      break
-    except Exception as e:
-      last_exception = e
-      wait_sec = 2**attempt + 5
-      print(f"[경고] {model_name} 실패: {e}. {wait_sec}초 후 다시 지수 재시도...")
-      time.sleep(wait_sec)
-  if success:
-    break
+def call_gemini(text: str) -> str:
+    last = None
+    for model in MODELS:
+        for attempt in range(1, 4):
+            try:
+                print(f"[진행] {model} 호출 (시도 {attempt})…")
+                if _NEW_SDK:
+                    r = _client.models.generate_content(
+                        model=model, contents=text,
+                        config=types.GenerateContentConfig(response_mime_type="application/json"),
+                    )
+                    return r.text
+                m = _legacy.GenerativeModel(model)
+                return m.generate_content(
+                    text, generation_config={"response_mime_type": "application/json"}
+                ).text
+            except Exception as e:  # noqa: BLE001
+                last = e
+                wait = 2 ** attempt + 3
+                print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
+                time.sleep(wait)
+    raise RuntimeError(f"Gemini 전체 실패: {last}")
 
-if not success:
-  print(f"[최종 에러] Gemini 연산 전체 실패: {last_exception}")
-  exit(1)
 
+def validate(commodities: dict) -> None:
+    need = {"name", "unit", "current_price", "forecast_6m_target",
+            "monthly_forecast_base", "rationale_base"}
+    missing = [k for k in COMMODITIES if k not in commodities]
+    if missing:
+        raise ValueError(f"누락된 원자재: {missing}")
+    for k in COMMODITIES:
+        gaps = need - set(commodities[k])
+        if gaps:
+            raise ValueError(f"{k} 필드 누락: {sorted(gaps)}")
+        if not commodities[k]["monthly_forecast_base"]:
+            raise ValueError(f"{k} monthly_forecast_base 비어 있음")
+
+
+print("[진행] Gemini 전망 생성…")
 try:
-  result_json = json.loads(response.text)
-  final_output = {
-      "update_date": market_summary_for_ai["update_date"],
-      "macro": market_summary_for_ai["macro"],
-      "history_3y": res_daily,
-      "forecast_data": result_json["commodities"],
-  }
-  with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
-    json.dump(final_output, f, ensure_ascii=False, indent=2)
-  print(f"[성공] raw_materials_forecast.json 생성 완료!")
-except Exception as e:
-  print(f"[JSON 파싱 실패] {e}")
-  exit(1)
+    parsed = json.loads(call_gemini(prompt))
+    commodities = parsed["commodities"]
+    validate(commodities)
+except Exception as e:  # noqa: BLE001
+    print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
+    sys.exit(1)
+
+output = {
+    "update_date": update_date,
+    "macro": macro,
+    "history_3y": history,   # (호환) 키 이름 유지 — 실제로는 최대 10년치
+    "forecast_data": commodities,
+}
+with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
+    json.dump(output, f, ensure_ascii=False, indent=2)
+print("[성공] raw_materials_forecast.json 저장 완료")

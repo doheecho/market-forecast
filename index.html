@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>원자재 시황 · 6대 핵심 원자재 AI 가격 전망</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <style>
+    :root {
+      --bg: #0f1216;
+      --panel: #171c23;
+      --panel-2: #1e252e;
+      --line: #2b333d;
+      --text: #e6e9ee;
+      --muted: #8b95a1;
+      --up: #ef4444;      /* 상승 = 빨강 (국내 관습) */
+      --down: #3b82f6;    /* 하락 = 파랑 */
+      --accent: #22d3ee;
+      --green: #22c55e;
+      --amber: #f59e0b;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f6f7f9; --panel: #fff; --panel-2: #f0f2f5; --line: #e2e6eb;
+        --text: #1a1f26; --muted: #667085;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font: 14px/1.5 -apple-system, "Segoe UI", "Malgun Gothic", Roboto, sans-serif;
+    }
+    a { color: var(--accent); }
+
+    .topbar {
+      display: flex; align-items: baseline; justify-content: space-between;
+      flex-wrap: wrap; gap: 8px; padding: 16px 20px; border-bottom: 1px solid var(--line);
+    }
+    .topbar h1 { font-size: 18px; margin: 0; }
+    .topbar .sub { color: var(--muted); font-weight: 400; font-size: 13px; margin-left: 8px; }
+    .meta { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 12px; }
+    .meta button {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+      border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px;
+    }
+    .meta button:hover { border-color: var(--accent); }
+
+    .wrap { padding: 16px 20px 48px; max-width: 1180px; margin: 0 auto; }
+
+    .tabs {
+      display: flex; gap: 6px; margin: 4px 0 16px; flex-wrap: wrap;
+      border-bottom: 1px solid var(--line);
+    }
+    .tabs button {
+      background: transparent; border: none; border-bottom: 2px solid transparent;
+      color: var(--muted); padding: 10px 14px; cursor: pointer; font-size: 14px;
+    }
+    .tabs button.active { color: var(--text); border-bottom-color: var(--accent); }
+
+    .block {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+    }
+    .block > h3 {
+      margin: 0 0 12px; font-size: 13px; color: var(--muted); font-weight: 600;
+    }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+    .card .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+    .card .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .card .value.up { color: var(--up); }
+    .card .value.down { color: var(--down); }
+    .card .sub { color: var(--muted); font-size: 11px; margin-top: 2px; }
+    .chip {
+      display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px;
+      border-radius: 999px; margin-left: 6px;
+    }
+    .chip.up { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
+    .chip.down { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+
+    .advisor {
+      background: color-mix(in srgb, var(--amber) 10%, var(--panel));
+      border: 1px solid var(--line); border-left: 4px solid var(--amber);
+      border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;
+      color: var(--amber); font-weight: 600; white-space: pre-line;
+    }
+
+    .ctl-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+    .ctl-lbl { color: var(--muted); font-size: 11px; margin-right: 4px; }
+    .ctl-row button {
+      background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+      border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    }
+    .ctl-row button:hover { border-color: var(--accent); }
+    .ctl-row button.on {
+      color: var(--text); border-color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
+    }
+
+    .chart-box { position: relative; height: 340px; width: 100%; }
+    .mini-box { position: relative; height: 110px; width: 100%; }
+
+    .scroll-x { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; }
+    .metric {
+      flex: none; width: 216px; border: 1px solid var(--line); border-radius: 8px;
+      padding: 11px 12px; background: var(--panel-2);
+    }
+    .metric .top { display: flex; justify-content: space-between; align-items: start; gap: 6px; margin-bottom: 8px; }
+    .metric .name { font-weight: 600; font-size: 12px; }
+    .metric .val { font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+    .metric .date { color: var(--muted); font-size: 10px; }
+    .badge {
+      font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 5px; white-space: nowrap;
+    }
+    .badge.danger { background: color-mix(in srgb, var(--up) 20%, transparent); color: var(--up); }
+    .badge.warning { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); }
+    .badge.success { background: color-mix(in srgb, var(--green) 20%, transparent); color: var(--green); }
+    .badge.secondary { background: var(--line); color: var(--muted); }
+
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+    @media (max-width: 780px) { .grid-3, .grid-2 { grid-template-columns: 1fr; } }
+
+    .scenario { border: 1px solid var(--line); border-top: 3px solid var(--line); border-radius: 8px; padding: 14px; background: var(--panel-2); }
+    .scenario .head { font-weight: 700; font-size: 13px; margin-bottom: 6px; }
+    .scenario p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .scenario.base { border-top-color: var(--amber); } .scenario.base .head { color: var(--amber); }
+    .scenario.bull { border-top-color: var(--up); }    .scenario.bull .head { color: var(--up); }
+    .scenario.bear { border-top-color: var(--down); }  .scenario.bear .head { color: var(--down); }
+
+    .analog { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: var(--panel-2); }
+    .analog .head { display: flex; justify-content: space-between; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 8px; margin-bottom: 8px; }
+    .analog .title { font-weight: 700; font-size: 13px; }
+    .analog .period { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .analog .summary { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin: 0 0 8px; }
+    .analog .foot { display: flex; justify-content: space-between; align-items: center; font-size: 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .analog .foot .kv small { color: var(--muted); font-size: 10px; display: block; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    thead th { color: var(--muted); font-weight: 500; font-size: 11px; }
+    td.mono { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--up); font-weight: 600; }
+    td.m { white-space: nowrap; color: var(--muted); }
+
+    .loading, .error { padding: 40px 20px; text-align: center; color: var(--muted); }
+    .error { color: var(--up); }
+    .src { color: var(--muted); font-size: 11px; margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <h1>원자재 시황 <span class="sub">6대 핵심 원자재 AI 가격 전망</span></h1>
+    <div class="meta">
+      <span id="asOf">데이터 로딩 중…</span>
+      <button id="refreshBtn" type="button" title="데이터 다시 불러오기">↻ 새로고침</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <nav class="tabs" id="tabs"></nav>
+    <div id="app"><div class="loading">데이터 로딩 중…</div></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <script src="./dashboard.js"></script>
+</body>
+</html>
