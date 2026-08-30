@@ -12,17 +12,18 @@ const JSON_RAW =
 const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
 
 const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum",
-  "steel", "ironore", "nickel", "zinc"];
+  "steel", "ironore", "nickel", "zinc", "tungsten"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
   gold: "금", silver: "은", platinum: "백금",
-  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연",
+  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
 };
 // 현재가 카드에서 단위 옆에 표기할 시장/기준 (제목에서는 뺀다)
 const VENUE = {
   wti: "CME", copper: "LME Cash", aluminum: "LME Cash",
   gold: "LBMA", silver: "LBMA", platinum: "LBMA / NYMEX",
   steel: "CME HRC", ironore: "CFR China", nickel: "LME Cash", zinc: "LME Cash",
+  tungsten: "APT Europe",
 };
 // f.name / 라벨에서 괄호 부속(예: " (CME)") 제거
 const stripVenue = (s) => String(s || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
@@ -30,7 +31,7 @@ const RANGES = [
   ["3M", 3], ["6M", 6], ["1Y", 12], ["2Y", 24], ["3Y", 36], ["5Y", 60], ["ALL", 0],
 ];
 
-const state = { data: null, key: "wti", months: 12, analogIdx: 0, charts: {} };
+const state = { data: null, key: "wti", months: 12, analogIdx: 0, analogWin: 12, charts: {} };
 
 /* ---------- 부트스트랩 ---------- */
 if (window.Chart) {
@@ -466,36 +467,56 @@ function renderScenarios(f) {
     row("bear", "비관 (Bear)", f.rationale_bear);
 }
 
-/* ---------- 과거 유사 국면 (여러 개면 ①②… 번호로 전환) ---------- */
+/* ---------- 과거 유사 국면 (1년/6개월 비교창 · 여러 개면 ①②… 로 전환) ---------- */
 const CIRCLED = (i) => String.fromCharCode(0x2460 + i); // ①②③④⑤
 
 function renderAnalogs(f, sign, rateStr) {
   const box = document.getElementById("analogs");
   const h3 = document.querySelector("#analogBlock h3");
-  const list = f.analogs || [];
-  if (h3) h3.querySelector(".analog-nav")?.remove();
+  const has12 = (f.analogs || []).length;
+  const has6 = (f.analogs_6m || []).length;
+  // 선택한 비교창에 데이터가 없으면 있는 쪽으로 자동 전환
+  if (state.analogWin === 6 && !has6 && has12) state.analogWin = 12;
+  if (state.analogWin === 12 && !has12 && has6) state.analogWin = 6;
+  const win = state.analogWin === 6 ? 6 : 12;
+  const list = win === 6 ? f.analogs_6m || [] : f.analogs || [];
 
-  if (!list.length) {
-    box.innerHTML = "<p class='src'>유사 국면 데이터 없음 (AI 분석 갱신 후 표시)</p>";
-    return;
-  }
-
-  const idx = Math.min(state.analogIdx || 0, list.length - 1);
+  const idx = Math.min(Math.max(state.analogIdx || 0, 0), Math.max(list.length - 1, 0));
   state.analogIdx = idx;
 
-  if (list.length > 1 && h3) {
-    const nav = document.createElement("span");
-    nav.className = "analog-nav";
-    nav.innerHTML = list
-      .map((_, i) => `<button data-i="${i}"${i === idx ? ' class="on"' : ""}>${CIRCLED(i)}</button>`)
-      .join("");
-    nav.addEventListener("click", (e) => {
+  // 헤더: 좌(제목 + 1년/6개월) · 우(①②③)
+  if (h3) {
+    h3.innerHTML =
+      `<span class="ana-h-left">과거 유사 국면` +
+      `<span class="ana-win">` +
+      `<button data-w="12"${win === 12 ? ' class="on"' : ""}>1년</button>` +
+      `<button data-w="6"${win === 6 ? ' class="on"' : ""}>6개월</button>` +
+      `</span></span>` +
+      (list.length > 1
+        ? `<span class="analog-nav">` +
+          list
+            .map((_, i) => `<button data-i="${i}"${i === idx ? ' class="on"' : ""}>${CIRCLED(i)}</button>`)
+            .join("") +
+          `</span>`
+        : "");
+    h3.querySelector(".ana-win").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-w]");
+      if (!b || +b.dataset.w === win) return;
+      state.analogWin = +b.dataset.w;
+      state.analogIdx = 0;
+      renderAnalogs(f, sign, rateStr);
+    });
+    h3.querySelector(".analog-nav")?.addEventListener("click", (e) => {
       const b = e.target.closest("button[data-i]");
       if (!b) return;
       state.analogIdx = +b.dataset.i;
       renderAnalogs(f, sign, rateStr);
     });
-    h3.appendChild(nav);
+  }
+
+  if (!list.length) {
+    box.innerHTML = `<p class='src'>${win === 6 ? "6개월" : "1년"} 비교창 유사 국면 데이터 없음 (AI 분석 갱신 후 표시)</p>`;
+    return;
   }
 
   const a = list[idx];
@@ -506,7 +527,7 @@ function renderAnalogs(f, sign, rateStr) {
         <span class="title">${list.length > 1 ? CIRCLED(idx) + " " : ""}${escapeHtml(a.title || "유사 국면")}</span>
         <span class="badge success">유사도 ${escapeHtml(a.similarity || "-")}</span>
       </div>
-      <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 월간 추이 상관도 기준</div>
+      <div class="period">분석 기간 ${escapeHtml(a.period || "-")} · 최근 ${win === 6 ? "6" : "12"}개월 추이 상관도 기준</div>
       <p class="summary">${escapeHtml(a.summary || "")}</p>
       <div class="mini-box"><canvas id="mini0"></canvas></div>
       <div class="foot">

@@ -1,8 +1,8 @@
-"""6대 핵심 원자재 AI 가격 전망 생성기.
+"""핵심 원자재 AI 가격 전망 생성기.
 
-1. 야후 파이낸스에서 원자재 6종 + 매크로 4종의 시계열을 수집(최근 3년 일봉 + 그 이전 주봉)
+1. 야후 파이낸스 원자재 8종 + 매크로 4종 시계열 수집, manual/ CSV(니켈·아연·텅스텐) 병합
 2. 요약본을 Gemini 에 전달해 6개월 월별 전망(base/bull/bear) · 시나리오 · 요인지표 ·
-   과거 유사국면을 JSON 으로 생성
+   과거 유사국면(1년/6개월 두 비교창)을 JSON 으로 생성
 3. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
 """
 from __future__ import annotations
@@ -15,7 +15,8 @@ import time
 import pandas as pd
 
 from _common import (
-    COMMODITIES, META, build_history, fetch_raw, latest_macro, today_str,
+    COMMODITIES, META, build_history, fetch_raw, latest_macro,
+    load_manual_history, today_str,
 )
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -47,17 +48,12 @@ history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# 야후에 없어 수동/외부로 채워둔 시세(니켈·아연 등, seed_prices.py)를 이어붙인다.
-try:
-    _prev_hist = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
-    for _k, _rows in _prev_hist.items():
-        if _k not in COMMODITIES and _rows and _k in META:
-            history[_k] = _rows
-            spot[_k] = _rows[-1]["price"]
-            COMMODITIES.append(_k)
-            print(f"[진행] 외부 소스 시세 병합: {_k} ({len(_rows)}행)")
-except Exception:  # noqa: BLE001
-    pass
+# 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입 → COMMODITIES 에 편입.
+for _k, _rows in load_manual_history().items():
+    history[_k] = _rows
+    spot[_k] = _rows[-1]["price"]
+    if _k not in COMMODITIES:
+        COMMODITIES.append(_k)
 
 # AI 프롬프트용 다운샘플 (~70 포인트, 토큰·지연 절약)
 history_brief = {}
@@ -66,45 +62,57 @@ for k, rows in history.items():
     history_brief[k] = rows[::step]
 
 
-_SIM_MIN = 0.5   # 이 상관 이상만 '유사국면'으로 채택 (없으면 0개, 많으면 여러 개)
+_FWD = 6          # 유사국면 '이후 실제' 궤적 길이(개월)
 _MAX_ANALOGS = 6  # 프롬프트·JSON 폭주 방지용 안전 상한
 
 
-def top_analogs(key: str, sim_min: float = _SIM_MIN) -> list[dict]:
-    """현재 12개월 궤적과 월간수익률 상관이 sim_min 이상인 과거 구간을 전부(겹치지 않게)
-    유사도 내림차순으로 반환. 각 구간의 실제 가격 12개 + 이후 6개월 실제 6개를 그대로."""
+def _monthly_series(key: str):
+    """(월말 종가 시리즈, 배수) 반환. 야후 원본이 없으면 history[key] 로 대체."""
     s = raw.get(key)
-    if s is None or s.empty:
+    if s is not None and not s.empty:
+        return s.resample("ME").last().dropna(), META[key][2]
+    rows = history.get(key) or []
+    if len(rows) < 24:
+        return None, 1.0
+    ser = pd.Series(
+        {pd.Timestamp(r["date"]): float(r["price"]) for r in rows if r.get("price")}
+    ).sort_index()
+    return ser.resample("ME").last().dropna(), 1.0
+
+
+def top_analogs(key: str, win: int = 12) -> list[dict]:
+    """현재 최근 `win`개월 궤적과 월간수익률 상관이 높은 과거 구간을 겹치지 않게
+    유사도 내림차순으로 반환. 각 구간의 실제 가격 `win`개 + 이후 6개월 실제 6개."""
+    m, mult = _monthly_series(key)
+    if m is None or len(m) < win + _FWD + win:
         return []
-    m = s.resample("ME").last().dropna()
-    if len(m) < 12 + 6 + 12:
-        return []
-    mult = META[key][2]
-    cur_ret = m.iloc[-12:].pct_change().dropna().values
+    sim_min = 0.6 if win <= 6 else 0.5   # 표본이 짧을수록(상관 불안정) 문턱을 높임
+    excl = max(4, win * 2 // 3)          # 겹침 배제 간격
+    cur_ret = m.iloc[-win:].pct_change().dropna().values
 
     cands = []
-    for i in range(len(m) - 12 - 6):
-        win = m.iloc[i:i + 12]
-        if win.index[-1] >= m.index[-12]:
+    for i in range(len(m) - win - _FWD):
+        w = m.iloc[i:i + win]
+        if w.index[-1] >= m.index[-win]:
             break
-        r = win.pct_change().dropna().values
+        r = w.pct_change().dropna().values
         if len(r) != len(cur_ret):
             continue
         c = float(pd.Series(r).corr(pd.Series(cur_ret)))
         if c == c and c >= sim_min:
-            cands.append((c, i, win, m.iloc[i + 12:i + 18]))
+            cands.append((c, i, w, m.iloc[i + win:i + win + _FWD]))
     cands.sort(key=lambda x: -x[0])
 
     out, used = [], []
-    for c, i, win, after in cands:
-        if any(abs(i - j) < 8 for j in used):   # 8개월 이내 겹침 배제
+    for c, i, w, after in cands:
+        if any(abs(i - j) < excl for j in used):
             continue
         used.append(i)
-        hist_p = [round(float(v) * mult, 2) for v in win.values]
+        hist_p = [round(float(v) * mult, 2) for v in w.values]
         fore_p = [round(float(v) * mult, 2) for v in after.values]
         chg = (fore_p[-1] / hist_p[-1] - 1) * 100 if hist_p and hist_p[-1] else 0.0
         out.append({
-            "period": f"'{win.index[0].strftime('%y.%m')}~'{win.index[-1].strftime('%y.%m')}",
+            "period": f"'{w.index[0].strftime('%y.%m')}~'{w.index[-1].strftime('%y.%m')}",
             "similarity": f"{max(0.0, c) * 100:.0f}%",
             "actual": f"{chg:+.1f}%",
             "miniHist": hist_p,
@@ -115,7 +123,8 @@ def top_analogs(key: str, sim_min: float = _SIM_MIN) -> list[dict]:
     return out
 
 
-analogs_real = {k: top_analogs(k) for k in COMMODITIES}
+analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}      # 1년 비교
+analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}     # 6개월 비교
 
 
 update_date = today_str()
@@ -165,6 +174,9 @@ FACTORS = {
     "zinc": "매크로: 글로벌 건설·인프라(아연도금 강재) 수요, 달러·중국 경기. "
             "마이크로: 광산 정광 공급(TC 제련수수료 방향), LME/SHFE 재고·캔슬드워런트, 주요 제련소 감산/정비, "
             "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
+    "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공우주 수요, 미·중 갈등. "
+                "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
+                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
 }
 
 SCHEMA_ONE = """{
@@ -179,7 +191,10 @@ SCHEMA_ONE = """{
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
   "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
     "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
-    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ]
+    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
+  "analogs_6m": [ {"period": "(6개월 리스트의 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
 }"""
 
 _KEYS_STR = ", ".join(COMMODITIES)
@@ -210,26 +225,33 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs 는 아래 '실제 과거 유사국면' 리스트의 각 항목당 1개씩 만드세요(리스트 순서·개수 그대로).
+- analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
+  각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
   period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
   title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
+  최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
+  전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
+  그 뒤에는 구매 담당자에게 조언하는 형태로 마무리해주면 될것같다. 
   우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
   원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
   가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
 - WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 커버류 (레진 소재), PE Foam/Pad 같은 포장재/비닐류의 영향이 큼
-- 구리의 경우 프로브용 Raw Cable, 시스템용 일반 Cable (HDMI, BD to BD 등), Heatsink 등에 영향
-- 알루미늄은 주로 시스템의 Frame, Bracket류 등 외장부품에 많이 사용됨
+- 구리의 경우 Cable, Heatsink 등에 영향
+- 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
 - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
-- 백금은 단결정(Single Crystal)의 생산과정에 설비에 사용되고 우리에게 직접 영향이 있지는 않음
-- 열연강판(steel)/철광석(ironore)은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의
+- 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
+- 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의
   상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum USD/oz.t, silver US￠/oz.t,
   steel USD/s.ton, ironore USD/dmt.
 
-[실제 과거 유사국면 (실거래 데이터에서 상관분석으로 탐색됨)]
+[실제 과거 유사국면 (1년) — 실거래 데이터 상관분석]
 {json.dumps(analogs_real, ensure_ascii=False)}
+
+[실제 과거 유사국면 (6개월) — 실거래 데이터 상관분석]
+{json.dumps(analogs_real_6m, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
 {chr(10).join(f"- {k}: {FACTORS[k]}" for k in COMMODITIES if k in FACTORS)}
@@ -363,6 +385,27 @@ def fix_months(commodities: dict) -> None:
             c[arr] = rows
 
 
+def fix_analogs(commodities: dict) -> None:
+    """유사국면의 수치(period·similarity·actual·miniHist·miniForecast)는 파이썬이 계산한
+    실제 값으로 강제하고, AI 에게서는 title·summary 만 취한다(1년·6개월 두 리스트)."""
+    for k in COMMODITIES:
+        c = commodities.get(k)
+        if not c:
+            continue
+        for field, real_map in (("analogs", analogs_real), ("analogs_6m", analogs_real_6m)):
+            real = real_map.get(k) or []
+            got = c.get(field) or []
+            merged = []
+            for i, rr in enumerate(real):
+                g = got[i] if i < len(got) and isinstance(got[i], dict) else {}
+                merged.append({
+                    **rr,
+                    "title": (str(g.get("title") or "").strip() or "과거 유사 구간"),
+                    "summary": str(g.get("summary") or "").strip(),
+                })
+            c[field] = merged
+
+
 def validate(commodities: dict) -> None:
     need = {"name", "unit", "current_price", "forecast_6m_target",
             "monthly_forecast_base", "rationale_base"}
@@ -403,6 +446,7 @@ try:
     commodities = parsed["commodities"]
     validate(commodities)
     fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
+    fix_analogs(commodities)         # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
     clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
     sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
 except Exception as e:  # noqa: BLE001

@@ -8,7 +8,9 @@ from __future__ import annotations
 import json
 import sys
 
-from _common import build_history, fetch_raw, latest_macro, today_str
+from _common import (
+    build_history, fetch_raw, latest_macro, load_manual_history, today_str,
+)
 
 raw = fetch_raw()
 history, _spot = build_history(raw)
@@ -20,11 +22,14 @@ try:
 except Exception:  # noqa: BLE001
     doc = {}
 
-# 야후에서 안 받는 키(니켈·아연 등, seed_prices.py 로 주입)는 덮어쓰지 않고 보존.
+# 야후에 없는 품목: manual/<key>.csv 우선, 없으면 직전 파일값 보존(니켈·아연·텅스텐).
+manual = load_manual_history()
 prev_hist = doc.get("history_3y") or {}
 for k, rows in prev_hist.items():
     if k not in history and rows:
         history[k] = rows
+for k, rows in manual.items():
+    history[k] = rows
 
 doc["history_3y"] = history
 doc["macro"] = latest_macro(raw)
