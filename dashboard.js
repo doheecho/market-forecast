@@ -60,9 +60,9 @@ function setProvenance(d) {
   const fc = (d && d.update_date) || "—";
   const S = '<span class="sep">·</span>';
   el.innerHTML =
-    `시세 <b>Yahoo Finance</b> 원자재 선물${S}니켈·아연 <b>LME</b>(수동 입력)${S}매크로 4종(DXY·美10Y·USD/CNY·USD/KRW)` +
-    `<br>6개월 전망 <b>Google Gemini</b> 생성 + 규칙 기반 보정(이상치·월라벨·스프레드)${S}` +
-    `과거 유사국면은 실거래 가격곡선 유사도 탐색` +
+    `시세 <b>Yahoo Finance</b> 원자재 선물${S}니켈·아연·텅스텐 <b>Korea PDS</b>(수동 입력)${S}매크로 4종(달러인덱스 DXY·美 10년 국채금리·USD/CNY·USD/KRW)` +
+    `<br>6개월 전망 <b>Google Gemini</b> 생성 + 규칙 기반 보정·<b>Base</b>: 12M 로그수익율 평균에 20% 반영·<b>Bull/Bear</b>: 원자재별 36M 로그수익율 표준편차 계산 후 z = 1.28 x σ x √t 로 밴드폭 계산` +
+    `과거 유사국면은 통계 근거가 아닌 AI 참고 서술용 정성 Data (다중비교로 인한 우연한 고상관 위험 및 비정상 시계열 상관의 과장 가능성)` +
     `<br>최종 갱신 — 시세 <b>${px}</b>${S}전망 <b>${fc}</b> (KST)`;
   el.hidden = false;
 }
