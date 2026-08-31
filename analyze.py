@@ -12,6 +12,7 @@ import os
 import sys
 import time
 
+import numpy as np
 import pandas as pd
 
 from _common import (
@@ -94,23 +95,44 @@ def _monthly_series(key: str):
 _SIM_MIN = 0.5  # 유사도(0~1) 채택 문턱. 없으면 0개, 많으면 여러 개
 
 
+def z_normalize(series):
+    """형태(Shape) 비교를 위한 Z-Score 정규화 (평균 0, 표준편차 1)"""
+    s = np.std(series)
+    return np.zeros_like(series) if s == 0 else (series - np.mean(series)) / s
+
+
+def dtw_distance_sq(s1, s2):
+    """DTW (Dynamic Time Warping) 최소 누적 제곱 거리 계산"""
+    n, m = len(s1), len(s2)
+    dtw = np.full((n + 1, m + 1), np.inf)
+    dtw[0, 0] = 0
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            cost = (s1[i - 1] - s2[j - 1]) ** 2
+            dtw[i, j] = cost + min(
+                dtw[i - 1, j],      # 삽입 (시간 지연)
+                dtw[i, j - 1],      # 삭제 (시간 단축)
+                dtw[i - 1, j - 1]   # 매치
+            )
+    return dtw[n, m]
+
+
 def top_analogs(key: str, win: int = 12) -> list[dict]:
     """현재 최근 `win`개월 '가격 궤적'과 모양·진폭이 닮은 과거 구간을 겹치지 않게
-    유사도 내림차순으로 반환. 각 구간의 실제 가격 `win`개 + 이후 6개월 실제 6개.
-
-    유사도 = (정규화 가격경로 상관, 0~1) × (0.6 + 0.4 × 진폭비).
-    - 정규화 경로 상관: 첫 값을 100 으로 리베이스한 곡선끼리의 Pearson 상관 →
-      '방향·굴곡'이 같은지. (기존의 '월간수익률' 상관은 잔진동 리듬만 봐서,
-      +90% 폭등 구간이 -9% 횡보 구간과 90% 유사로 잡히는 오류가 있었음)
-    - 진폭비 = min(범위)/max(범위): 한쪽은 급등·한쪽은 횡보처럼 '크기'가 다르면 감점.
+    유사도 내림차순으로 반환 (DTW 알고리즘 적용).
     """
     m, mult = _monthly_series(key)
     if m is None or len(m) < win + _FWD + win:
         return []
-    excl = max(4, win * 2 // 3)          # 겹침 배제 간격
+        
+    excl = max(4, win * 2 // 3)
     cur = m.iloc[-win:]
     cur_path = (cur / cur.iloc[0] * 100.0).to_numpy()
     cur_amp = float(cur_path.max() - cur_path.min())
+
+    # 현재 궤적 정규화 (형태만 추출)
+    cur_z = z_normalize(cur_path)
 
     cands = []
     for i in range(len(m) - win - _FWD):
@@ -119,17 +141,28 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
             break
         if w.isna().any() or not w.iloc[0]:
             continue
+            
         wp = (w / w.iloc[0] * 100.0).to_numpy()
         if len(wp) != len(cur_path):
             continue
-        pc = float(pd.Series(wp).corr(pd.Series(cur_path)))
-        if pc != pc:                     # NaN (분산 0 등)
-            continue
+
+        # DTW 기반 형태(Shape) 유사도 산출
+        wp_z = z_normalize(wp)
+        dist_sq = dtw_distance_sq(cur_z, wp_z)
+        
+        # 유클리드 거리와 피어슨 상관계수의 관계식(r = 1 - SSE/2n)을 응용
+        shape_sim = max(0.0, 1.0 - (dist_sq / (2.0 * win)))
+
+        # 진폭(Amplitude) 크기 차이에 대한 페널티
         amp = float(wp.max() - wp.min())
         amp_ratio = min(amp, cur_amp) / max(amp, cur_amp) if max(amp, cur_amp) else 0.0
-        sim = max(0.0, pc) * (0.6 + 0.4 * amp_ratio)
+        
+        # 최종 유사도: 형태 60% + 진폭 40%
+        sim = shape_sim * (0.6 + 0.4 * amp_ratio)
+        
         if sim >= _SIM_MIN:
             cands.append((sim, i, w, m.iloc[i + win:i + win + _FWD]))
+            
     cands.sort(key=lambda x: -x[0])
 
     out, used = [], []
@@ -149,6 +182,7 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
         })
         if len(out) >= _MAX_ANALOGS:
             break
+            
     return out
 
 
@@ -248,7 +282,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
   · 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 월에 반영.
   · 방향이 바뀔 근거가 있으면 그 달에 고점/저점을 만들어도 됩니다. 단일 방향 6연속 지양.
 - 각 월에서 bear.price < base.price < bull.price 는 반드시 유지. bull/bear 는 base 대비
-  불확실성으로, 시간이 갈수록 스프레드가 벌어지되 이벤트 리스크가 큰 달은 더 크게.
+  불확실성으로, 시간이 갈수록 스프레 벌어지되 이벤트 리스크가 큰 달은 더 크게.
 - 6개월 누적 변화폭은 대체로 ±25% 이내(초강세/초약세 국면이면 근거와 함께 초과 가능).
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
