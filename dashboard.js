@@ -22,8 +22,8 @@ const LABEL = {
 const VENUE = {
   wti: "CME", copper: "LME Cash", aluminum: "LME Cash",
   gold: "LBMA", silver: "LBMA", platinum: "LBMA / NYMEX",
-  steel: "CME HRC", ironore: "CFR China", nickel: "LME Cash", zinc: "LME Cash",
-  tungsten: "APT Europe",
+  steel: "CME HRC", ironore: "CFR China", nickel: "LME Cash USD/ton", zinc: "LME Cash USD/ton",
+  tungsten: "China Spot RMB/mt",
 };
 // f.name / 라벨에서 괄호 부속(예: " (CME)") 제거
 const stripVenue = (s) => String(s || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
