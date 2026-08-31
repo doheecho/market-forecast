@@ -20,9 +20,9 @@ const LABEL = {
 };
 // 현재가 카드에서 단위 옆에 표기할 시장/기준 (제목에서는 뺀다)
 const VENUE = {
-  wti: "CME", copper: "LME Cash", aluminum: "LME Cash",
-  gold: "LBMA", silver: "LBMA", platinum: "LBMA / NYMEX",
-  steel: "CME HRC", ironore: "CFR China", nickel: "LME Cash USD/ton", zinc: "LME Cash USD/ton",
+  wti: "NYMEX WTI Futures · USD/bbl", copper: "COMEX Copper Futures · USD/lb", aluminum: "COMEX Aluminum Futures · USD/mt",
+  gold: "COMEX Gold Futures · ", silver: "COMEX Silver Futures· USD/ozt", platinum: "NYMEX Futures· USD/ozt",
+  steel: "CME HRC Futures · USD/st", ironore: "CFR China", nickel: "LME Cash USD/ton", zinc: "LME Cash USD/ton",
   tungsten: "China Spot RMB/mt",
 };
 // f.name / 라벨에서 괄호 부속(예: " (CME)") 제거
