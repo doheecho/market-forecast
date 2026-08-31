@@ -1,4 +1,5 @@
 """analyze.py(주간 AI 전망)와 prices.py(일간 시세 갱신)가 공유하는 수집 로직."""
+
 from __future__ import annotations
 
 import csv
@@ -15,6 +16,7 @@ TICKERS = {
     "steel": "HRC=F", "ironore": "TIO=F",
     "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
 }
+
 # 야후에서 받는 원자재. 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입.
 YF_COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum", "steel", "ironore"]
 COMMODITIES = list(YF_COMMODITIES)  # 파이프라인이 참조하는 전체 목록 (확장 가능)
@@ -24,10 +26,10 @@ MANUAL_DIR = "manual"  # manual/nickel.csv, manual/zinc.csv, manual/tungsten.csv
 # name, unit, 가격 배수(야후 원값 → 표기 단위)
 META = {
     "wti": ("WTI 원유 (CME)", "USD/bbl", 1.0),
-    "copper": ("전기동 (LME)", "USD/ton", 2204.62),   # HG=F: USD/lb → USD/ton
+    "copper": ("전기동 (LME)", "USD/ton", 2204.62),  # HG=F: USD/lb → USD/ton
     "aluminum": ("알루미늄 (LME)", "USD/ton", 1.0),
     "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
-    "silver": ("은 (LBMA)", "USD/oz.t", 1.0),          # SI=F: USD/oz (금·백금과 동일 단위)
+    "silver": ("은 (LBMA)", "USD/oz.t", 1.0),  # SI=F: USD/oz (금·백금과 동일 단위)
     "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
     "steel": ("열연강판 (CME HRC)", "USD/s.ton", 1.0),  # 냉연 SPCC 아님 — 방향성 참고
     "ironore": ("철광석 62%Fe (CFR China)", "USD/dmt", 1.0),
@@ -55,6 +57,7 @@ def _read_price_csv(path: str) -> list[dict]:
     if text is None:
         print(f"[경고] {path} 인코딩 인식 실패 — 건너뜀")
         return []
+
     lines = text.splitlines()
     if not lines:
         return []
@@ -73,6 +76,7 @@ def _read_price_csv(path: str) -> list[dict]:
     if di < 0 or pi < 0:
         print(f"[경고] {path}: 날짜/가격 열을 못 찾음 (헤더 {header}) — 건너뜀")
         return []
+
     seen: dict[str, float] = {}
     for r in rows[1:]:
         if len(r) <= max(di, pi):
@@ -122,6 +126,7 @@ def fetch_raw() -> dict[str, pd.Series]:
         close = dl["Close"]
     except Exception:  # noqa: BLE001
         close = dl
+
     raw: dict[str, pd.Series] = {}
     for name, tk in TICKERS.items():
         try:
@@ -135,14 +140,46 @@ def fetch_raw() -> dict[str, pd.Series]:
     return raw
 
 
+# ── 이상치(outlier) 처리 ────────────────────────────────────────────────
+# 기존 "직전 8개 중앙값 대비 ±12%" 같은 고정 퍼센트 규칙은 원자재마다 실제
+# 변동성이 다른데도 동일한 문턱을 쓰는 문제가 있었음(니켈처럼 원래 변동성이
+# 큰 자산은 정상적인 움직임도 잘려나가고, 금처럼 변동성이 낮은 자산은
+# 진짜 이상치를 못 거를 수 있음).
+#
+# → Robust Z-score(MAD 기반)로 교체: 최근 구간의 "중앙값 절대편차(MAD)"를
+#   변동성 척도로 쓰고, 그 자산 고유의 변동성 대비 몇 배(threshold) 벗어났는지로
+#   판정. MAD 는 평균/표준편차보다 극단값 자체에 덜 휘둘리는 robust 통계량이라
+#   "이상치를 걸러내기 위한 척도"로 표준편차보다 적합함.
+#   robust z = 0.6745 * (x - median) / MAD  (0.6745 는 정규분포 가정 시 표준편차와
+#   맞추기 위한 보정상수), |robust z| > threshold(기본 3.5) 를 이상치로 판정.
+_MAD_WINDOW = 20      # 최근 며칠(영업일) 을 기준으로 median/MAD 계산
+_MAD_THRESHOLD = 3.5  # 이 값 초과시 이상치 (3.5는 통계학에서 흔히 쓰는 robust 기준)
+
+
+def _robust_zscore(values: list[float], x: float) -> float:
+    if not values:
+        return 0.0
+    med = sorted(values)[len(values) // 2]
+    abs_dev = sorted(abs(v - med) for v in values)
+    mad = abs_dev[len(abs_dev) // 2]
+    if mad == 0:
+        return 0.0
+    return 0.6745 * (x - med) / mad
+
+
 def _despike_tail(rows: list[dict]) -> list[dict]:
-    """꼬리에 튄 값(야후 마지막 봉 오류): 직전 8개 중앙값 대비 ±12% 초과면 잘라냄."""
+    """꼬리에 튄 값(야후 마지막 봉 오류)을 MAD 기반 robust z-score 로 판정해 잘라냄.
+
+    직전 _MAD_WINDOW 개 값의 median/MAD 대비 robust z-score 가 _MAD_THRESHOLD 를
+    넘는 마지막 값들을 순차적으로 제거한다. 고정 퍼센트 대신 그 자산 고유의
+    최근 변동성을 기준으로 삼기 때문에, 원래 변동성이 큰 원자재(니켈 등)를
+    과도하게 잘라내거나 변동성이 낮은 원자재(금 등)의 이상치를 놓치는 문제를 줄인다.
+    """
     end = len(rows)
-    while end > 9:
-        ref = sorted(r["price"] for r in rows[end - 9:end - 1])
-        med = ref[len(ref) // 2]
-        a = rows[end - 1]["price"]
-        if med and abs(a / med - 1) > 0.12:
+    while end > _MAD_WINDOW + 1:
+        window = [r["price"] for r in rows[end - _MAD_WINDOW - 1:end - 1]]
+        z = _robust_zscore(window, rows[end - 1]["price"])
+        if abs(z) > _MAD_THRESHOLD:
             end -= 1
         else:
             break

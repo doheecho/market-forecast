@@ -1,13 +1,19 @@
 """핵심 원자재 AI 가격 전망 생성기.
 
 1. 야후 파이낸스 원자재 8종 + 매크로 4종 시계열 수집, manual/ CSV(니켈·아연·텅스텐) 병합
-2. 요약본을 Gemini 에 전달해 6개월 월별 전망(base/bull/bear) · 시나리오 · 요인지표 ·
-   과거 유사국면(1년/6개월 두 비교창)을 JSON 으로 생성
-3. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
+2. 요약본을 Gemini 에 전달해 6개월 월별 시나리오(스토리·요인지표·과거 유사국면 1년/6개월)를
+   JSON 으로 생성
+3. base(중심 전망)는 AI 가 아니라 **통계적으로 계산**(약한 드리프트의 로그수익률 추정) —
+   AI 는 그 경로에 대한 rationale(정성 설명)만 채움
+4. bull/bear 밴드 폭은 **과거 월간 변동성 × √t 스케일링**(랜덤워크 신뢰구간)으로 계산 —
+   AI 가 서술한 상방/하방 비대칭(어느 쪽이 더 벌어지는지)만 반영
+5. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
 """
+
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -34,12 +40,10 @@ MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.
 try:
     from google import genai
     from google.genai import types
-
     _client = genai.Client(api_key=API_KEY)
     _NEW_SDK = True
 except ImportError:
     import google.generativeai as _legacy
-
     _legacy.configure(api_key=API_KEY)
     _NEW_SDK = False
 
@@ -72,7 +76,6 @@ for k, rows in history.items():
     step = max(1, len(rows) // 70)
     history_brief[k] = rows[::step]
 
-
 _FWD = 6          # 유사국면 '이후 실제' 궤적 길이(개월)
 _MAX_ANALOGS = 6  # 프롬프트·JSON 폭주 방지용 안전 상한
 
@@ -103,11 +106,18 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
       '방향·굴곡'이 같은지. (기존의 '월간수익률' 상관은 잔진동 리듬만 봐서,
       +90% 폭등 구간이 -9% 횡보 구간과 90% 유사로 잡히는 오류가 있었음)
     - 진폭비 = min(범위)/max(범위): 한쪽은 급등·한쪽은 횡보처럼 '크기'가 다르면 감점.
+
+    ※ 주의(통계적 한계): 표본이 적은 슬라이딩 윈도우에서 상관 임계값만으로
+      구간을 뽑는 방식은 다중비교로 인한 우연한 고상관(데이터 스누핑) 위험이
+      있고, 비정상(non-stationary) 가격 레벨의 상관은 추세만으로도 과장될 수
+      있다. 여기서 뽑힌 유사국면은 "정량적 예측 근거"가 아니라 AI 서술(analogs
+      의 title/summary)을 위한 정성적 참고 자료로만 취급한다.
     """
     m, mult = _monthly_series(key)
     if m is None or len(m) < win + _FWD + win:
         return []
-    excl = max(4, win * 2 // 3)          # 겹침 배제 간격
+
+    excl = max(4, win * 2 // 3)  # 겹침 배제 간격
     cur = m.iloc[-win:]
     cur_path = (cur / cur.iloc[0] * 100.0).to_numpy()
     cur_amp = float(cur_path.max() - cur_path.min())
@@ -123,15 +133,15 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
         if len(wp) != len(cur_path):
             continue
         pc = float(pd.Series(wp).corr(pd.Series(cur_path)))
-        if pc != pc:                     # NaN (분산 0 등)
+        if pc != pc:  # NaN (분산 0 등)
             continue
         amp = float(wp.max() - wp.min())
         amp_ratio = min(amp, cur_amp) / max(amp, cur_amp) if max(amp, cur_amp) else 0.0
         sim = max(0.0, pc) * (0.6 + 0.4 * amp_ratio)
         if sim >= _SIM_MIN:
             cands.append((sim, i, w, m.iloc[i + win:i + win + _FWD]))
-    cands.sort(key=lambda x: -x[0])
 
+    cands.sort(key=lambda x: -x[0])
     out, used = [], []
     for sim, i, w, after in cands:
         if any(abs(i - j) < excl for j in used):
@@ -153,16 +163,86 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
 
 
 analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}      # 1년 비교
-analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}     # 6개월 비교
+analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}    # 6개월 비교
+
+
+# ── 통계적 base 경로 + 변동성 기반 밴드 ──────────────────────────────────
+# 기존 방식(AI 가 base 자체를 "그럴듯한 굴곡"으로 생성)은 실제 통계적 근거가
+# 약함. 대신:
+#   · base  = 현재가에서, 과거 로그수익률의 평균(드리프트)을 "약하게만"
+#             반영해 뻗어나가는 경로. 드리프트를 100% 반영하면 최근 추세를
+#             그대로 미래로 외삽하는 과신이 되므로 damping(<1)으로 눌러준다.
+#             ("금융 시계열은 단기적으로 예측 불가능에 가깝다"는 통념에 맞춘
+#             보수적 기준선 — 완전 랜덤워크(드리프트 0)와 추세추종의 중간.)
+#   · 밴드  = 과거 월간 로그수익률의 표준편차(σ)를 변동성 척도로 삼아,
+#             랜덤워크 가정 하의 표준적 스케일링(√t)으로 t개월 뒤 밴드폭을
+#             계산. z 값은 근사 신뢰수준(z=1.28 → 약 80% 구간)이며, 원자재별
+#             실제 변동성 차이를 그대로 반영한다(변동성 큰 니켈은 밴드가
+#             넓고, 변동성 낮은 금은 좁게 나옴).
+_DRIFT_DAMPING = 0.2   # 추세를 20%만 반영 (과신 방지)
+_DRIFT_WINDOW = 12     # 드리프트 추정에 쓸 최근 개월 수
+_VOL_WINDOW = 36       # 변동성(표준편차) 추정에 쓸 최근 개월 수(짧으면 있는 만큼 사용)
+_BAND_Z = 1.28         # 랜덤워크 밴드 신뢰수준 근사치 (약 80%)
+
+
+def _monthly_log_returns(key: str, window: int) -> list[float]:
+    m, _ = _monthly_series(key)
+    if m is None or len(m) < 3:
+        return []
+    tail = m.iloc[-(window + 1):] if len(m) > window else m
+    vals = tail.to_numpy()
+    rets = []
+    for a, b in zip(vals[:-1], vals[1:]):
+        if a and b and a > 0 and b > 0:
+            rets.append(math.log(b / a))
+    return rets
+
+
+def conservative_forecast(key: str, cur: float, n: int = 6) -> dict:
+    """통계적 base 경로 + 변동성 기반 bull/bear 밴드를 계산한다.
+
+    반환: {"base":[...], "vol_up":[...], "vol_dn":[...]}
+    - base: 약한 드리프트만 반영한 중심 전망 (완전 flat 은 아니지만 추세를 과신하지 않음)
+    - vol_up/vol_dn: 각 월의 밴드 반경(비율). bull = base*(1+vol_up), bear = base*(1-vol_dn)
+      의 "출발점"으로 쓰고, AI 가 서술한 비대칭(상방/하방 중 더 벌어지는 쪽)이 있으면
+      그 비율만큼 가감한다.
+    """
+    drift_rets = _monthly_log_returns(key, _DRIFT_WINDOW)
+    vol_rets = _monthly_log_returns(key, _VOL_WINDOW)
+
+    drift = (sum(drift_rets) / len(drift_rets) * _DRIFT_DAMPING) if drift_rets else 0.0
+
+    if len(vol_rets) >= 3:
+        mean_r = sum(vol_rets) / len(vol_rets)
+        var = sum((r - mean_r) ** 2 for r in vol_rets) / (len(vol_rets) - 1)
+        monthly_vol = math.sqrt(var)
+    else:
+        monthly_vol = 0.08  # 히스토리가 너무 짧을 때의 기본값(약 8%/월, 임의 폴백)
+
+    base, vol_up, vol_dn = [], [], []
+    for i in range(1, n + 1):
+        base.append(round(cur * math.exp(drift * i), 2))
+        band = _BAND_Z * monthly_vol * math.sqrt(i)  # √t 스케일링(랜덤워크 신뢰구간)
+        vol_up.append(band)
+        vol_dn.append(band)
+    return {"base": base, "vol_up": vol_up, "vol_dn": vol_dn, "monthly_vol": round(monthly_vol, 4),
+            "monthly_drift": round(drift, 4)}
+
+
+conservative = {k: conservative_forecast(k, spot.get(k) or 1.0) for k in COMMODITIES}
 
 
 update_date = today_str()
 macro = latest_macro(raw)
+
 market_input = {
     "update_date": update_date,
     "macro": macro,
     "current_spot": {k: spot.get(k) for k in COMMODITIES},  # 최근 실적가 — current_price 앵커
     "history_summary": history_brief,
+    # AI 에게 "이미 확정된" 통계적 base 경로를 알려주고, 그 경로에 대한 rationale(정성 설명)만
+    # 요청한다 — AI 가 숫자 자체를 새로 만들지 않도록 프롬프트에서 명시.
+    "conservative_base": {k: conservative[k]["base"] for k in COMMODITIES},
 }
 
 # 원자재별 주요 영향 요인 — metrics 선정 가이드로 프롬프트에 주입
@@ -213,10 +293,10 @@ SCHEMA_ONE = """{
   "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
   "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
   "advisor": "원자재 구매 담당자를 위한 3~4문장. 최근 시황 / 관련 글로벌 정세 / 알아야 할 주요 뉴스 / 대응 조언 순서로 서술.",
-  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 기본 시나리오 가격 근거 한 문장"} ],
-  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 낙관 시나리오 가격 근거(상방 요인 중심) 한 문장"} ],
-  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
-  "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
+  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "이 달 가격이 통계적 기준선(conservative_base) 수준일 것으로 보는 근거 한 문장. 가격 자체는 이미 주어졌으니 숫자를 새로 만들지 말고 근거만 서술."} ],
+  "monthly_forecast_bull": [ {"month": "2026-09", "bias": "+0.0%", "rationale": "해당 월 base 대비 상방으로 벗어날 근거(상방 요인 중심) 한 문장"} ],
+  "monthly_forecast_bear": [ {"month": "2026-09", "bias": "-0.0%", "rationale": "해당 월 base 대비 하방으로 벗어날 근거(하방 요인 중심) 한 문장"} ],
+  "rationale_base": "기본(통계적 기준선) 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
   "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
     "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
@@ -233,45 +313,48 @@ _SCHEMA_KEYS = ", ".join(
 )
 
 prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
+
 아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의
 6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
+**중요 — base 가격은 이미 통계적으로 계산되어 market_input.conservative_base 에 주어져
+있습니다. 당신은 그 숫자를 그대로 monthly_forecast_base[].price 에 복사하고,
+"왜 이 수준일 것으로 보는지"에 대한 rationale(정성 설명, 한 문장)만 채우세요.
+base 가격 자체를 새로 만들거나 바꾸지 마세요.**
+
 규칙:
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
-- monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
-  bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
-- current_price 는 위 current_spot 값(최근 실적가)과 동일하게, base 첫 달은 거기서 ±4% 이내 출발.
-- base 경로는 '직선'이 아니라 실제 전망처럼 **월별로 방향 전환·되돌림·기울기 변화**가
-  나타나야 합니다. 참고 근거:
-  · 위 '실제 과거 유사국면'의 miniForecast(그 국면 이후 실제 6개월 궤적)의 '모양'을 참고
-    (그대로 복사 말고, 현재 매크로/컨센서스에 맞춰 조정).
-  · 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 월에 반영.
-  · 방향이 바뀔 근거가 있으면 그 달에 고점/저점을 만들어도 됩니다. 단일 방향 6연속 지양.
-- 각 월에서 bear.price < base.price < bull.price 는 반드시 유지. bull/bear 는 base 대비
-  불확실성으로, 시간이 갈수록 스프레드가 벌어지되 이벤트 리스크가 큰 달은 더 크게.
-- 6개월 누적 변화폭은 대체로 ±25% 이내(초강세/초약세 국면이면 근거와 함께 초과 가능).
+- monthly_forecast_base 의 price 는 conservative_base 값을 그대로 사용, rationale 만 작성.
+- monthly_forecast_bull/bear 는 price 대신 base 대비 편차(bias, 예: "+8.5%", "-6.2%")만
+  제시하세요. 실제 폭(밴드)은 이후 파이썬이 과거 변동성 기반으로 재계산하며, 당신이 준
+  bias 의 "방향성과 상대적 크기"(어느 달에 더 벌어지는지, 상방/하방 중 어느 쪽이 더 큰지)만
+  참고합니다. 즉 bias 의 절대값보다 "이번 달이 저번달보다 더 벌어지는가", "이번 이벤트로
+  상방이 하방보다 더 큰가" 같은 상대적 패턴이 중요합니다.
+- 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 rationale/bias 에 반영.
+- 6개월 누적 변화폭(conservative_base 기준)은 이미 보수적으로 계산되어 있으므로 그대로 존중.
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
 - analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
   각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
+  이 유사국면은 정량적 근거가 아니라 참고 서술용입니다.
   period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
   title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
   최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
   전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
-  그 뒤에는 구매 담당자에게 조언하는 형태로 마무리해주면 될것같다. 
+  그 뒤에는 구매 담당자에게 조언하는 형태로 마무리해주면 될것같다.
   우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
   원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
   가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
-- WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류의 영향이 큼
-- 구리의 경우 Cable, Heatsink, Bracket 가격에 영향
-- 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
-- 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
-- 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
-- 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
+  - WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류의 영향이 큼
+  - 구리의 경우 Cable, Heatsink, Bracket 가격에 영향
+  - 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
+  - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
+  - 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
+  - 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum·silver USD/oz.t,
   steel USD/s.ton, ironore USD/dmt.
 
@@ -284,7 +367,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 [원자재별 주요 영향 요인]
 {chr(10).join(f"- {k}: {FACTORS[k]}" for k in COMMODITIES if k in FACTORS)}
 
-[시장 입력 데이터]
+[시장 입력 데이터 (conservative_base 는 통계적으로 이미 확정된 값)]
 {json.dumps(market_input, ensure_ascii=False)}
 
 응답 스키마 (commodities 의 각 값은 아래 형태, name/unit 은 원자재에 맞게):
@@ -302,7 +385,7 @@ def call_gemini(text: str) -> str:
                     cfg = {
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},  # AFC 경고 억제
-                        "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
+                        "temperature": 0.35,
                         "top_p": 0.9,
                     }
                     if "2.5" in model or "gemini-3" in model:
@@ -337,61 +420,94 @@ def _n(v, d=None):
 
 
 def sanitize_scenarios(commodities: dict) -> None:
-    """AI 의 월별 경로 '모양'은 최대한 살리고, 병리적 케이스만 최소 개입으로 바로잡는다.
-    - 현재가는 spot 으로 고정
-    - 극단 이상치만 절대 밴드(spot 의 0.5~2.0배)로 클립
-    - 각 월에서 bear < base < bull 이 되도록 어긋난 쪽만 살짝 벌림(경로는 안 뭉갬)
-    - 월 변동이 ±30% 를 넘는 튐만 30% 로 제한
-    - forecast_6m_target / change_rate 재계산"""
+    """base 는 통계적으로 확정된 conservative_base 값으로 강제 치환하고,
+    bull/bear 는 AI 가 준 bias(상대적 비대칭)를 참고해 과거 변동성 기반 밴드로 재계산한다.
+
+    - base: conservative[k]["base"] 로 완전히 덮어씀 (AI 숫자 무시, rationale 텍스트만 채택)
+    - bull/bear 밴드: vol_up/vol_dn(√t 스케일링된 변동성 밴드)을 기본으로 하되,
+      AI 가 bias 로 표현한 상방/하방 비대칭 비율이 있으면 그 비율만큼 밴드를 상방/하방으로
+      기울여 반영한다(밴드의 '전체 폭'은 통계량이 결정, '기울기'만 AI 서술 반영).
+    - forecast_6m_target / change_rate 재계산
+    """
     for k in COMMODITIES:
         c = commodities[k]
+        cons = conservative.get(k) or {}
+        base_path = cons.get("base")
+        vol_up = cons.get("vol_up")
+        vol_dn = cons.get("vol_dn")
+        if not base_path:
+            continue
+
+        cur = spot.get(k) or _n(c.get("current_price")) or base_path[0]
+        c["current_price"] = round(cur, 2)
+
         base = c.get("monthly_forecast_base") or []
         bull = c.get("monthly_forecast_bull") or []
         bear = c.get("monthly_forecast_bear") or []
-        if not base:
-            continue
 
-        cur = spot.get(k) or _n(c.get("current_price"))
-        if not cur or cur <= 0:
-            cur = _n(base[0].get("price"), 1.0)
-        c["current_price"] = round(cur, 2)
+        # base 가격을 통계적 경로로 강제 치환 (rationale 텍스트는 AI 것 유지)
+        for i in range(len(base_path)):
+            row = base[i] if i < len(base) else {}
+            row["price"] = base_path[i]
+            if i >= len(base):
+                base.append(row)
+        c["monthly_forecast_base"] = base[:len(base_path)]
 
-        lo_abs, hi_abs = cur * 0.5, cur * 2.0
+        # bull/bear: 통계적 밴드(vol_up/vol_dn)를 기본 폭으로, AI 의 bias 비율로
+        # 상/하 비대칭만 반영 (밴드 절대 폭 자체를 AI 가 부풀리지 못하게 함)
+        for i in range(len(base_path)):
+            b = base_path[i]
+            up_band = vol_up[i]
+            dn_band = vol_dn[i]
 
-        # 1) base 경로: 튐만 제한, 모양은 유지
-        prev = cur
-        for row in base:
-            v = _n(row.get("price"), prev) or prev
-            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동 ±30% 초과만 제한
-            v = min(max(v, lo_abs), hi_abs)             # 극단 이상치만 클립
-            row["price"] = round(v, 2)
-            prev = v
+            bull_row = bull[i] if i < len(bull) else {}
+            bear_row = bear[i] if i < len(bear) else {}
+            ai_up_bias = _n(str(bull_row.get("bias", "")).replace("%", ""), None)
+            ai_dn_bias = _n(str(bear_row.get("bias", "")).replace("%", ""), None)
 
-        # 2) bull/bear 스프레드: 뒤로 갈수록 '반드시' 벌어지게(단조 증가). 상·하방 비대칭은 유지.
-        base_sp, grow = 0.02, 0.024                     # 2% → 6개월차 약 14%
-        spu_prev = spd_prev = 0.0
-        for i, row in enumerate(base):
-            b = row["price"]
-            gu = _n((bull[i] or {}).get("price")) if i < len(bull) else None
-            gd = _n((bear[i] or {}).get("price")) if i < len(bear) else None
-            spu = base_sp + grow * i
-            spd = base_sp + grow * i
-            if gu and gu > b:                           # AI 가 더 넓게 봤으면 그만큼 반영
-                spu = max(spu, gu / b - 1)
-            if gd and gd < b:
-                spd = max(spd, 1 - gd / b)
-            # 매달 최소 1.2%p 는 더 벌어지게(단조 증가 + 실제로 '점점' 넓어지는 팬), 상한 50%
-            spu = min(max(spu, spu_prev + 0.012 if i else spu), 0.5)
-            spd = min(max(spd, spd_prev + 0.012 if i else spd), 0.5)
-            spu_prev, spd_prev = spu, spd
+            # AI 가 상/하 비대칭을 시사했으면(둘 다 있을 때) 그 비율로 밴드를 기울임.
+            # 예: ai_up=10, ai_dn=4 면 상방이 하방의 2.5배 -> 통계적 총 밴드폭을
+            # 유지한 채 상/하로 나눠 재배분. 정보가 없으면 대칭(50:50).
+            if ai_up_bias is not None and ai_dn_bias is not None:
+                au, ad = abs(ai_up_bias), abs(ai_dn_bias)
+                total = au + ad
+                if total > 0:
+                    up_ratio = au / total
+                else:
+                    up_ratio = 0.5
+            else:
+                up_ratio = 0.5
+
+            total_band = up_band + dn_band
+            up_band = total_band * up_ratio
+            dn_band = total_band * (1 - up_ratio)
+
+            bull_price = round(b * math.exp(up_band), 2)
+            bear_price = round(b * math.exp(-dn_band), 2)
+
             if i < len(bull):
-                bull[i]["price"] = round(min(b * (1 + spu), hi_abs * 1.3), 2)
+                bull[i]["price"] = bull_price
+            else:
+                bull.append({**bull_row, "price": bull_price})
             if i < len(bear):
-                bear[i]["price"] = round(max(b * (1 - spd), lo_abs * 0.7), 2)
+                bear[i]["price"] = bear_price
+            else:
+                bear.append({**bear_row, "price": bear_price})
 
-        last = base[-1]["price"]
+        c["monthly_forecast_bull"] = bull[:len(base_path)]
+        c["monthly_forecast_bear"] = bear[:len(base_path)]
+
+        last = base_path[-1]
         c["forecast_6m_target"] = round(last, 2)
         c["forecast_change_rate"] = f"{(last / cur - 1) * 100:+.1f}%"
+        # 근거 화면 하단 표기용 — 이번에 계산에 쓴 통계량을 그대로 노출
+        c["stat_basis"] = {
+            "method": "conservative log-drift base + sqrt(t) volatility band",
+            "monthly_drift": cons.get("monthly_drift"),
+            "monthly_vol": cons.get("monthly_vol"),
+            "drift_damping": _DRIFT_DAMPING,
+            "band_confidence_z": _BAND_Z,
+        }
 
 
 def fix_months(commodities: dict) -> None:
@@ -404,6 +520,7 @@ def fix_months(commodities: dict) -> None:
         if m > 12:
             m, y = 1, y + 1
         seq.append(f"{y:04d}-{m:02d}")
+
     for k in COMMODITIES:
         c = commodities.get(k) or {}
         for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
@@ -449,8 +566,8 @@ def validate(commodities: dict) -> None:
 
 
 def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
-    """실행 간 '급변'만 억제한다(완만화 X). 같은 달의 직전 전망 대비
-    변화가 jump 를 넘으면 그 절반만 반영해 튐을 눌러준다. AI 경로 모양은 유지."""
+    """실행 간 '급변'만 억제한다. base 는 이미 통계적으로 계산되어 매 실행 급변이
+    구조적으로 크지 않지만, 변동성 급등 구간 대비 안전장치로 유지한다."""
     try:
         prev = json.load(open("raw_materials_forecast.json", encoding="utf-8"))["forecast_data"]
     except Exception:  # noqa: BLE001
@@ -468,26 +585,28 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
                     r["price"] = round((nv + target) / 2, 2)
 
 
-print("[진행] Gemini 전망 생성…")
+print("[진행] Gemini 시나리오 서술 생성…")
 try:
     parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
     validate(commodities)
-    fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
-    fix_analogs(commodities)         # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
-    clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
-    sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
+    fix_months(commodities)        # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
+    fix_analogs(commodities)       # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
+    sanitize_scenarios(commodities)  # base 는 통계값으로 강제, bull/bear 는 변동성 밴드로 재계산
+    clamp_vs_previous(commodities)   # 실행 간 급변만 추가 억제
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)
 
 output = {
-    "update_date": update_date,   # AI 전망 생성일
-    "prices_date": update_date,   # 시세 갱신일 (prices.py 가 매일 덮어씀)
+    "update_date": update_date,     # AI 전망 생성일
+    "prices_date": update_date,     # 시세 갱신일 (prices.py 가 매일 덮어씀)
     "macro": macro,
-    "history_3y": history,        # (호환) 키 이름 유지
+    "history_3y": history,          # (호환) 키 이름 유지
     "forecast_data": commodities,
 }
+
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
+
 print("[성공] raw_materials_forecast.json 저장 완료")
