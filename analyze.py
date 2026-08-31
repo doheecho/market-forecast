@@ -1,22 +1,18 @@
 """핵심 원자재 AI 가격 전망 생성기.
 
 1. 야후 파이낸스 원자재 8종 + 매크로 4종 시계열 수집, manual/ CSV(니켈·아연·텅스텐) 병합
-2. 요약본을 Gemini 에 전달해 6개월 월별 시나리오(스토리·요인지표·과거 유사국면 1년/6개월)를 생성
-3. base(중심 전망)는 AI 가 아니라 **통계적으로 계산**(약한 드리프트의 로그수익률 추정)
-4. bull/bear 밴드 폭은 **과거 월간 변동성 × √t 스케일링**(랜덤워크 신뢰구간)으로 계산
-5. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
+2. 요약본을 Gemini 에 전달해 6개월 월별 전망(base/bull/bear) · 시나리오 · 요인지표 ·
+   과거 유사국면(1년/6개월 두 비교창)을 JSON 으로 생성
+3. raw_materials_forecast.json 으로 저장 (실패 시 기존 파일 유지)
 """
-
 from __future__ import annotations
 
 import json
-import math
 import os
 import sys
 import time
 
 import pandas as pd
-from pydantic import BaseModel, Field, create_model
 
 from _common import (
     COMMODITIES, META, build_history, fetch_raw, latest_macro,
@@ -27,37 +23,39 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
-# 💡 [수정됨] 에러 로그의 권장사항에 따라 최신 모델인 gemini-3.6-flash 로 업데이트
+# 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
+# lite 를 먼저 — 가장 빠르고 thinking 지연이 없다.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
-    "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
     "gemini-flash-latest",
+    "gemini-2.5-flash",
 ]
 
 try:
     from google import genai
     from google.genai import types
+
     _client = genai.Client(api_key=API_KEY)
     _NEW_SDK = True
 except ImportError:
     import google.generativeai as _legacy
+
     _legacy.configure(api_key=API_KEY)
     _NEW_SDK = False
 
-# ==============================================================================
-# 1. 데이터 수집 및 COMMODITIES 확정
-# ==============================================================================
 raw = fetch_raw()
 history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# 야후에 없는 품목 수동 병합 -> COMMODITIES 리스트에 편입
+# 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입 → COMMODITIES 에 편입.
 for _k, _rows in load_manual_history().items():
     history[_k] = _rows
     spot[_k] = _rows[-1]["price"]
     if _k not in COMMODITIES:
         COMMODITIES.append(_k)
 
+# 이번 수집에서 비어 버린 품목(야후 간헐 실패)은 직전 파일값으로 되살린다.
 try:
     _prev = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
     for _k in COMMODITIES:
@@ -68,78 +66,19 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-
-# ==============================================================================
-# 2. Pydantic 스키마 정의 (Structured Outputs 용)
-# ==============================================================================
-class MonthlyForecastBase(BaseModel):
-    month: str = Field(description="예: '2026-09'")
-    price: float = Field(description="이후 파이썬이 재계산하므로 임의의 값(예: 0.0)을 넣어도 무방함")
-    rationale: str = Field(description="이 달 가격이 통계적 기준선(conservative_base) 수준일 것으로 보는 근거 한 문장")
-
-class MonthlyForecastBias(BaseModel):
-    month: str = Field(description="예: '2026-09'")
-    bias: str = Field(description="base 대비 상방/하방 편차 (예: '+8.5%', '-6.2%'). 이 비대칭성으로 AI의 방향성 확신도를 표현.")
-    rationale: str = Field(description="해당 월 base 대비 상방/하방으로 벗어날 근거(해당 요인 중심) 한 문장")
-
-class Metric(BaseModel):
-    label: str = Field(description="지표명 (예: '위안화 환율')")
-    val: str = Field(description="최신 추정치와 단위 (예: '6.7222 (USD/CNY)')")
-    date: str = Field(description="기준일 (예: '2026.08.27')")
-    cat: str = Field(description="'공급', '수요', '투자', '매크로' 중 하나")
-    status: str = Field(description="'강세', '보통', '약세' 중 하나")
-    badge: str = Field(description="'danger', 'warning', 'success', 'secondary' 중 하나")
-
-class Analog(BaseModel):
-    period: str = Field(description="제공된 값 그대로 복사")
-    similarity: str = Field(description="제공된 값 그대로 복사")
-    actual: str = Field(description="제공된 값 그대로 복사")
-    miniHist: list[float] = Field(description="제공된 배열 그대로 복사")
-    miniForecast: list[float] = Field(description="제공된 배열 그대로 복사")
-    title: str = Field(description="그 시기에 실제 있었던 역사적 사건명")
-    summary: str = Field(description="그 국면의 수급/매크로 배경 요약")
-
-class CommodityForecast(BaseModel):
-    name: str = Field(description="원자재 이름 (예: 'WTI 원유 (CME)')")
-    unit: str = Field(description="단위 (예: 'USD/bbl')")
-    current_price: float = Field(description="현재 실적가")
-    forecast_6m_target: float = Field(description="임의의 숫자 (파이썬이 재계산함)")
-    forecast_change_rate: str = Field(description="예: '+0.0%' (파이썬이 재계산함)")
-    volatility_score: int = Field(description="예상되는 변동성 점수 (1~10)")
-    planning_advisor: str = Field(description="초음파 진단기기 부품 조달/구매 담당자를 위한 핵심 1문장 전략 코멘트")
-    advisor: str = Field(
-        description="최근 시황(단가추이 및 정세) -> 원자재 주요 뉴스(매크로/마이크로) -> 구매 담당자 대응 조언(완제품 자재 가격 전가 및 리스크 헤징) 순서로 작성된 3~4문장"
-    )
-    monthly_forecast_base: list[MonthlyForecastBase]
-    monthly_forecast_bull: list[MonthlyForecastBias]
-    monthly_forecast_bear: list[MonthlyForecastBias]
-    rationale_base: str = Field(description="기본(통계적 기준선) 시나리오 요약")
-    rationale_bull: str = Field(description="낙관 시나리오 요약")
-    rationale_bear: str = Field(description="비관 시나리오 요약")
-    metrics: list[Metric] = Field(description="가격에 영향이 큰 지표 위주 6~8개")
-    analogs: list[Analog]
-    analogs_6m: list[Analog]
-
-commodity_fields = {k: (CommodityForecast, ...) for k in COMMODITIES}
-CommoditiesModel = create_model('CommoditiesModel', **commodity_fields)
-
-class ForecastResponse(BaseModel):
-    update_date: str = Field(description="생성 기준일")
-    commodities: CommoditiesModel
-
-
-# ==============================================================================
-# 3. 통계적 기준선 및 과거 유사 궤적 연산
-# ==============================================================================
+# AI 프롬프트용 다운샘플 (~70 포인트, 토큰·지연 절약)
 history_brief = {}
 for k, rows in history.items():
     step = max(1, len(rows) // 70)
     history_brief[k] = rows[::step]
 
-_FWD = 6
-_MAX_ANALOGS = 6
+
+_FWD = 6          # 유사국면 '이후 실제' 궤적 길이(개월)
+_MAX_ANALOGS = 6  # 프롬프트·JSON 폭주 방지용 안전 상한
+
 
 def _monthly_series(key: str):
+    """(월말 종가 시리즈, 배수) 반환. 야후 원본이 없으면 history[key] 로 대체."""
     s = raw.get(key)
     if s is not None and not s.empty:
         return s.resample("ME").last().dropna(), META[key][2]
@@ -151,16 +90,28 @@ def _monthly_series(key: str):
     ).sort_index()
     return ser.resample("ME").last().dropna(), 1.0
 
-_SIM_MIN = 0.5
+
+_SIM_MIN = 0.5  # 유사도(0~1) 채택 문턱. 없으면 0개, 많으면 여러 개
+
 
 def top_analogs(key: str, win: int = 12) -> list[dict]:
+    """현재 최근 `win`개월 '가격 궤적'과 모양·진폭이 닮은 과거 구간을 겹치지 않게
+    유사도 내림차순으로 반환. 각 구간의 실제 가격 `win`개 + 이후 6개월 실제 6개.
+
+    유사도 = (정규화 가격경로 상관, 0~1) × (0.6 + 0.4 × 진폭비).
+    - 정규화 경로 상관: 첫 값을 100 으로 리베이스한 곡선끼리의 Pearson 상관 →
+      '방향·굴곡'이 같은지. (기존의 '월간수익률' 상관은 잔진동 리듬만 봐서,
+      +90% 폭등 구간이 -9% 횡보 구간과 90% 유사로 잡히는 오류가 있었음)
+    - 진폭비 = min(범위)/max(범위): 한쪽은 급등·한쪽은 횡보처럼 '크기'가 다르면 감점.
+    """
     m, mult = _monthly_series(key)
     if m is None or len(m) < win + _FWD + win:
         return []
-    excl = max(4, win * 2 // 3)
+    excl = max(4, win * 2 // 3)          # 겹침 배제 간격
     cur = m.iloc[-win:]
     cur_path = (cur / cur.iloc[0] * 100.0).to_numpy()
     cur_amp = float(cur_path.max() - cur_path.min())
+
     cands = []
     for i in range(len(m) - win - _FWD):
         w = m.iloc[i:i + win]
@@ -172,15 +123,15 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
         if len(wp) != len(cur_path):
             continue
         pc = float(pd.Series(wp).corr(pd.Series(cur_path)))
-        if pc != pc:
+        if pc != pc:                     # NaN (분산 0 등)
             continue
         amp = float(wp.max() - wp.min())
         amp_ratio = min(amp, cur_amp) / max(amp, cur_amp) if max(amp, cur_amp) else 0.0
         sim = max(0.0, pc) * (0.6 + 0.4 * amp_ratio)
         if sim >= _SIM_MIN:
             cands.append((sim, i, w, m.iloc[i + win:i + win + _FWD]))
-
     cands.sort(key=lambda x: -x[0])
+
     out, used = [], []
     for sim, i, w, after in cands:
         if any(abs(i - j) < excl for j in used):
@@ -200,122 +151,147 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
             break
     return out
 
-analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}
-analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}
 
-_DRIFT_DAMPING = 0.2
-_DRIFT_WINDOW = 12
-_VOL_WINDOW = 36
-_BAND_Z = 1.28
-_AI_TILT_WEIGHT = 0.5
+analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}      # 1년 비교
+analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}     # 6개월 비교
 
-def _monthly_log_returns(key: str, window: int) -> list[float]:
-    m, _ = _monthly_series(key)
-    if m is None or len(m) < 3:
-        return []
-    tail = m.iloc[-(window + 1):] if len(m) > window else m
-    vals = tail.to_numpy()
-    rets = []
-    for a, b in zip(vals[:-1], vals[1:]):
-        if a and b and a > 0 and b > 0:
-            rets.append(math.log(b / a))
-    return rets
 
-def conservative_forecast(key: str, cur: float, n: int = 6) -> dict:
-    drift_rets = _monthly_log_returns(key, _DRIFT_WINDOW)
-    vol_rets = _monthly_log_returns(key, _VOL_WINDOW)
-    drift = (sum(drift_rets) / len(drift_rets) * _DRIFT_DAMPING) if drift_rets else 0.0
-
-    if len(vol_rets) >= 3:
-        mean_r = sum(vol_rets) / len(vol_rets)
-        var = sum((r - mean_r) ** 2 for r in vol_rets) / (len(vol_rets) - 1)
-        monthly_vol = math.sqrt(var)
-    else:
-        monthly_vol = 0.08
-
-    base, vol_up, vol_dn = [], [], []
-    for i in range(1, n + 1):
-        base.append(round(cur * math.exp(drift * i), 2))
-        band = _BAND_Z * monthly_vol * math.sqrt(i)
-        vol_up.append(band)
-        vol_dn.append(band)
-    return {"base": base, "vol_up": vol_up, "vol_dn": vol_dn, "monthly_vol": round(monthly_vol, 4),
-            "monthly_drift": round(drift, 4)}
-
-conservative = {k: conservative_forecast(k, spot.get(k) or 1.0) for k in COMMODITIES}
 update_date = today_str()
 macro = latest_macro(raw)
-
 market_input = {
     "update_date": update_date,
     "macro": macro,
-    "current_spot": {k: spot.get(k) for k in COMMODITIES},
+    "current_spot": {k: spot.get(k) for k in COMMODITIES},  # 최근 실적가 — current_price 앵커
     "history_summary": history_brief,
-    "conservative_base": {k: conservative[k]["base"] for k in COMMODITIES},
 }
 
+# 원자재별 주요 영향 요인 — metrics 선정 가이드로 프롬프트에 주입
 FACTORS = {
-    "wti": "매크로: 달러(DXY), PMI, 연준 금리, GDP. 마이크로: 원유재고, SPR, OPEC+ 감산량, 셰일 리그, 정제마진, 지정학",
-    "copper": "매크로: 중국 부동산/PMI, 달러. 마이크로: LME/SHFE 재고, 제련 TC/RC, 칠레/페루 생산차질, 전력망/AI 데이터센터 수요",
-    "aluminum": "매크로: 에너지(가스/석탄) 가격, 중국 탄소중립. 마이크로: 재고, 제련소 감산, 보크사이트(기니) 공급, 경량화/건설 수요",
-    "gold": "매크로: 실질금리, 달러, 기대인플레. 마이크로: 중앙은행 매입, ETF 보유량, 지정학 위험지수",
-    "silver": "매크로: 금 비율, 실질금리. 마이크로: 태양광 설치, 전장/전자 수요, 부산물 공급 의존, ETF",
-    "platinum": "매크로: 디젤차 판매, EV 전환속도. 마이크로: 남아공 전력/파업, 자동차 촉매 로딩량, 팔라듐 스프레드",
-    "steel": "매크로: 중국 인프라, 반덤핑 관세. 마이크로: 철광석/원료탄 가격, 조강생산 통제, 자동차/조선 수요, HRC 스프레드",
-    "ironore": "매크로: 중국 GDP/부동산, 해상운임(BDI). 마이크로: 호주/브라질 출하량 및 기후, 중국 항구 재고, 고로 가동률",
-    "nickel": "매크로: 스테인리스/EV 배터리 수요. 마이크로: 인니 광석/수출정책, 재고, class1/2 스프레드",
-    "zinc": "매크로: 건설 인프라 수요. 마이크로: 광산 정광 공급(TC), 재련소 감산, 도금강판 수요",
-    "tungsten": "매크로: 절삭공구(제조업 CAPEX), 방산. 마이크로: 중국 수출쿼터/통제, APT 고시가, 서방 공급망 다변화",
+    "wti": "매크로: 달러인덱스(DXY), 글로벌 제조업 PMI, 美 연준 정책금리·기대인플레(BEI), 美 실질GDP·경기침체 확률, "
+           "위안화 환율. "
+           "마이크로: EIA 주간 원유재고·쿠싱 재고, SPR(전략비축유) 수준, OPEC+ 실효 감산량·잉여생산능력, "
+           "美 셰일 리그카운트·생산량, 정제마진(크랙스프레드), 원유 선물 커브(콘탱고/백워데이션), "
+           "관리형자금 순매수 포지션(CFTC), 중동·러시아·베네수엘라 지정학·제재",
+    "copper": "매크로: 중국 부동산 착공·PMI·인프라 채권 발행, 글로벌 금리·경기, 달러 방향성. "
+              "마이크로: LME/COMEX/SHFE 재고 합계, LME 캔슬드워런트 비율, 제련 TC/RC(가공수수료), "
+              "칠레·페루·콩고 광산 생산차질·광석 품위 저하, 정광 수출입, 폐동(스크랩) 공급, "
+              "전기차·재생에너지·전력망·AI 데이터센터 실수요, 중국 국가전력망 발주",
+    "aluminum": "매크로: 유럽 천연가스·전력 선물, 석탄가, 중국 탄소중립·생산쿼터(4,500만t 캡), 달러·금리. "
+                "마이크로: LME 재고·캔슬드워런트, 상하이 재고, 알루미나(원료)·가성소다 가격, 중국·유럽 제련소 감산/재가동, "
+                "지역 프리미엄(MJP·유럽 듀티페이드), 보크사이트 공급(기니), 자동차 경량화·건설·포장재 수요",
+    "gold": "매크로: 美 10년 실질금리(TIPS, 역상관), 달러인덱스, 기대인플레·CPI, 연준 점도표·금리인하 기대, "
+            "글로벌 부채·재정적자·신용리스크. "
+            "마이크로: 각국 중앙은행 순매입량(WGC), 금 ETF 보유량 증감, COMEX 투기 순포지션, "
+            "실물 프리미엄(상하이 vs 런던), 지정학 위험지수(GPR), 리스크오프 자금흐름",
+    "silver": "매크로: 금 가격·Gold-Silver Ratio, 美 실질금리·달러, 글로벌 제조업 PMI. "
+              "마이크로: 태양광 설치량·N형 셀 은 사용량, 전장·전자 수요, 산업용 vs 투자용 수요 비중, "
+              "광산 공급(구리·아연·연 부산물 의존), 재활용 공급, COMEX 재고·투기 포지션, 은 ETF 자금",
+    "platinum": "매크로: 글로벌 경상용차·디젤차 판매, 내연기관→HEV/BEV 전환속도, 달러·금리. "
+                "마이크로: 남아공(세계 70%) 전력공급(로드셰딩)·임금협상·파업, 러시아 팔라듐 대체(스위칭) 수요, "
+                "자동차 촉매(가솔린 삼원촉매) 로딩량, 수소 연료전지·전해조 수요, WPIC 수급수지, "
+                "지상재고(ETF·거래소), 팔라듐-백금 스프레드",
+    "steel": "매크로: 중국 부동산·인프라 투자, 글로벌 제조업/건설 PMI, 달러·위안화, 각국 관세·반덤핑(美 232조, EU CBAM). "
+             "마이크로: 철광석·원료탄(코킹콜) 가격, 中 조강생산 통제·감산 지침, 중국 철강 수출량·수출증치세 환급, "
+             "美 중서부 HRC 스프레드, 전기로 vs 고로 가동률, 자동차·가전·조선 수요, 유통재고·리드타임, "
+             "우리회사 관점: 시스템 Frame/Bracket 및 협력사 판금 가공품(SPCC 냉연) 단가에 후행 반영",
+    "ironore": "매크로: 중국 GDP·부동산 신규착공·특별채 발행, 달러 방향성, 해상운임(BDI). "
+               "마이크로: 호주·브라질(Vale·Rio·BHP·FMG) 출하량·기상(사이클론)·광산사고, 중국 항구 철광석 재고(45개항), "
+               "고로 가동률·철강 마진, 스크랩 상대가격, 62%Fe vs 65%/58% 품위 스프레드, 다롄상품거래소 투기 포지션",
+    "nickel": "매크로: 스테인리스 수요(중국 300계열), EV 배터리(하이니켈 NCM) 채용률, 달러·금리. "
+              "마이크로: 인도네시아 광석·NPI·MHP 증설 및 수출정책(RKAB 쿼터), LME 재고·중국 보세재고, "
+              "1급(class1) vs 2급 니켈 스프레드, 청산니켈 전환량, 인니 로열티·수출세",
+    "zinc": "매크로: 글로벌 건설·인프라(아연도금 강재) 수요, 달러·중국 경기. "
+            "마이크로: 광산 정광 공급(TC 제련수수료 방향), LME/SHFE 재고·캔슬드워런트, 주요 제련소 감산/정비, "
+            "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
+    "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공우주 수요, 미·중 갈등. "
+                "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
+                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
 }
 
+SCHEMA_ONE = """{
+  "name": "WTI 원유 (CME)", "unit": "USD/bbl",
+  "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
+  "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
+  "advisor": "원자재 구매 담당자를 위한 3~4문장. 최근 시황 / 관련 글로벌 정세 / 알아야 할 주요 뉴스 / 대응 조언 순서로 서술.",
+  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 기본 시나리오 가격 근거 한 문장"} ],
+  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 낙관 시나리오 가격 근거(상방 요인 중심) 한 문장"} ],
+  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
+  "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
+  "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
+  "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
+  "analogs_6m": [ {"period": "(6개월 리스트의 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
+}"""
 
-# ==============================================================================
-# 4. 프롬프트 정의
-# ==============================================================================
 _KEYS_STR = ", ".join(COMMODITIES)
+_SCHEMA_KEYS = ", ".join(
+    f'"{k}": {SCHEMA_ONE}' if k == COMMODITIES[0] else f'"{k}": {{...}}'
+    for k in COMMODITIES
+)
 
 prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
-아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의 6개월 가격 전망 데이터셋을 작성하세요.
+아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의
+6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
-**중요 — 가격 숫자는 당신이 만드는 게 아니라 이후 파이썬이 통계적으로 계산합니다.**
-market_input.conservative_base 는 "AI 개입 없는 순수 통계 중심선"(참고용)이고,
-실제 monthly_forecast_base/bull/bear 의 price 는 이후 코드가:
- - bull/bear 끝점 = 통계 중심선 ± 과거 변동성 기반 밴드 (당신이 못 바꿈)
- - base = 그 밴드 안에서, 당신이 적을 bull/bear 의 bias(상대적 방향성 강도)만큼 가중 이동한 위치
-로 재계산합니다. 즉 **당신의 역할은 숫자가 아니라 "방향성 판단(bias)"과 그 근거(rationale) 서술**입니다.
+규칙:
+- monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
+- monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
+  bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
+- current_price 는 위 current_spot 값(최근 실적가)과 동일하게, base 첫 달은 거기서 ±4% 이내 출발.
+- base 경로는 '직선'이 아니라 실제 전망처럼 **월별로 방향 전환·되돌림·기울기 변화**가
+  나타나야 합니다. 참고 근거:
+  · 위 '실제 과거 유사국면'의 miniForecast(그 국면 이후 실제 6개월 궤적)의 '모양'을 참고
+    (그대로 복사 말고, 현재 매크로/컨센서스에 맞춰 조정).
+  · 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 월에 반영.
+  · 방향이 바뀔 근거가 있으면 그 달에 고점/저점을 만들어도 됩니다. 단일 방향 6연속 지양.
+- 각 월에서 bear.price < base.price < bull.price 는 반드시 유지. bull/bear 는 base 대비
+  불확실성으로, 시간이 갈수록 스프레드가 벌어지되 이벤트 리스크가 큰 달은 더 크게.
+- 6개월 누적 변화폭은 대체로 ±25% 이내(초강세/초약세 국면이면 근거와 함께 초과 가능).
+- badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
+- metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
+  6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
+  cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
+- analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
+  각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
+  period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
+  title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
+- advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
+  최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
+  전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
+  그 뒤에는 구매 담당자에게 조언하는 형태로 마무리해주면 될것같다. 
+  우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
+  직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
+  원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
+  가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
+- WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류의 영향이 큼
+- 구리의 경우 Cable, Heatsink, Bracket 가격에 영향
+- 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
+- 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
+- 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
+- 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
+- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum·silver USD/oz.t,
+  steel USD/s.ton, ironore USD/dmt.
 
-[분석 및 서술 규칙]
-1. monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
-2. monthly_forecast_bull/bear 에는 price 대신 base 대비 편차(bias, 예: "+8.5%", "-6.2%")를 제시하세요.
-   이 bias 의 절대 크기 자체는 밴드폭 계산에 쓰이지 않고, **bull bias 와 bear bias 의 상대적 비율**(어느 쪽 근거가 더 강한지)만 base 위치를 정하는 데 쓰입니다. 우상향 확신이 강하면 bull bias 를 뚜렷하게 크게 적으세요.
-3. analogs 와 analogs_6m 은 주어진 리스트의 데이터를 임의 수정 없이 **그대로 복사**하고 title/summary 만 채우세요.
-4. metrics 는 제공된 '원자재별 주요 영향 요인'을 참고하여 현재 시점 가장 중요한 변수 6~8개를 선정해 채우세요.
-
-[Advisor (전략 코멘트) 필수 가이드 - 초음파 진단기기 제조사 관점]
-최근 시황(단가추이/글로벌 정세) -> 주요 뉴스(매크로/마이크로) -> 구매 담당자 대응 조언 순서로 서술하세요.
-아래 품목별 특성을 반드시 반영하여 자재 단가에 적시 반영하거나 리스크 헤징 전략을 제시하세요:
- - WTI: 직접 구매하진 않으나 석유 기반 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류 가격에 지대한 영향.
- - 구리: Cable, Heatsink, Bracket 가격에 직접적 영향.
- - 알루미늄: 시스템 Frame, Bracket 등 외장 부품에 대량 사용. 단기 급등 리스크 헷징 필수.
- - 금/은: Connector, FPCB, PCB, Cable 등 핵심 전장부품에 사용됨.
- - 백금: 단결정 생산 설비용으로 직접적 연관은 적으나 추이 모니터링.
- - 열연강판/철광석: 시스템 Frame, Bracket 및 협력사 판금가공품(SPCC 냉연강판)의 기초자재. 통상 1~2개월 후행하여 전가되므로 가격 변곡점 시기 협상 전략 제시 필요.
- - 니켈/아연/텅스텐: 지정학적 요인과 수출 쿼터 등 공급 리스크에 민감하게 대응.
-
-[실제 과거 유사국면 1년/6개월 데이터]
+[실제 과거 유사국면 (1년) — 실거래 가격궤적 유사도 분석]
 {json.dumps(analogs_real, ensure_ascii=False)}
+
+[실제 과거 유사국면 (6개월) — 실거래 가격궤적 유사도 분석]
 {json.dumps(analogs_real_6m, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
 {chr(10).join(f"- {k}: {FACTORS[k]}" for k in COMMODITIES if k in FACTORS)}
 
-[시장 입력 데이터 (conservative_base 는 통계적으로 확정된 값)]
+[시장 입력 데이터]
 {json.dumps(market_input, ensure_ascii=False)}
+
+응답 스키마 (commodities 의 각 값은 아래 형태, name/unit 은 원자재에 맞게):
+{{ "update_date": "{update_date}", "commodities": {{ {_SCHEMA_KEYS} }} }}
 """
 
-# ==============================================================================
-# 5. Gemini API 호출
-# ==============================================================================
+
 def call_gemini(text: str) -> str:
     last = None
     for model in MODELS:
@@ -323,31 +299,28 @@ def call_gemini(text: str) -> str:
             try:
                 print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
-                    cfg = types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=ForecastResponse, # 동적으로 생성된 Pydantic 주입
-                        temperature=0.35,
-                        top_p=0.9,
-                        automatic_function_calling={"disable": True},
-                    )
-                    # 모델 이름 체크조건도 유연하게 변경
-                    if "3" in model or "2.5" in model:
-                        cfg.thinking_config = {"thinking_budget": 0}
-                    
+                    cfg = {
+                        "response_mime_type": "application/json",
+                        "automatic_function_calling": {"disable": True},  # AFC 경고 억제
+                        "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
+                        "top_p": 0.9,
+                    }
+                    if "2.5" in model or "gemini-3" in model:
+                        cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
                     r = _client.models.generate_content(
-                        model=model, contents=text, config=cfg,
+                        model=model, contents=text,
+                        config=types.GenerateContentConfig(**cfg),
                     )
                     return r.text
-                else:
-                    m = _legacy.GenerativeModel(model)
-                    return m.generate_content(
-                        text,
-                        generation_config={
-                            "response_mime_type": "application/json",
-                            "temperature": 0.35,
-                            "top_p": 0.9,
-                        },
-                    ).text
+                m = _legacy.GenerativeModel(model)
+                return m.generate_content(
+                    text,
+                    generation_config={
+                        "response_mime_type": "application/json",
+                        "temperature": 0.35,
+                        "top_p": 0.9,
+                    },
+                ).text
             except Exception as e:  # noqa: BLE001
                 last = e
                 wait = 2 ** attempt
@@ -355,89 +328,75 @@ def call_gemini(text: str) -> str:
                 time.sleep(wait)
     raise RuntimeError(f"Gemini 전체 실패: {last}")
 
+
 def _n(v, d=None):
     try:
         return float(v)
     except (TypeError, ValueError):
         return d
 
-# ==============================================================================
-# 6. 통계 혼합 및 결과 후처리 (기존 로직 유지)
-# ==============================================================================
+
 def sanitize_scenarios(commodities: dict) -> None:
+    """AI 의 월별 경로 '모양'은 최대한 살리고, 병리적 케이스만 최소 개입으로 바로잡는다.
+    - 현재가는 spot 으로 고정
+    - 극단 이상치만 절대 밴드(spot 의 0.5~2.0배)로 클립
+    - 각 월에서 bear < base < bull 이 되도록 어긋난 쪽만 살짝 벌림(경로는 안 뭉갬)
+    - 월 변동이 ±30% 를 넘는 튐만 30% 로 제한
+    - forecast_6m_target / change_rate 재계산"""
     for k in COMMODITIES:
         c = commodities[k]
-        cons = conservative.get(k) or {}
-        base_path = cons.get("base")
-        vol_up = cons.get("vol_up")
-        vol_dn = cons.get("vol_dn")
-        if not base_path:
-            continue
-
-        cur = spot.get(k) or _n(c.get("current_price")) or base_path[0]
-        c["current_price"] = round(cur, 2)
-
         base = c.get("monthly_forecast_base") or []
         bull = c.get("monthly_forecast_bull") or []
         bear = c.get("monthly_forecast_bear") or []
+        if not base:
+            continue
 
-        new_base_prices = []
-        for i in range(len(base_path)):
-            b_stat = base_path[i]
-            band = vol_up[i]
+        cur = spot.get(k) or _n(c.get("current_price"))
+        if not cur or cur <= 0:
+            cur = _n(base[0].get("price"), 1.0)
+        c["current_price"] = round(cur, 2)
 
-            bull_row = bull[i] if i < len(bull) else {}
-            bear_row = bear[i] if i < len(bear) else {}
-            ai_up_bias = _n(str(bull_row.get("bias", "")).replace("%", ""), None)
-            ai_dn_bias = _n(str(bear_row.get("bias", "")).replace("%", ""), None)
+        lo_abs, hi_abs = cur * 0.5, cur * 2.0
 
-            if ai_up_bias is not None and ai_dn_bias is not None:
-                au, ad = abs(ai_up_bias), abs(ai_dn_bias)
-                total = au + ad
-                up_ratio = (au / total) if total > 0 else 0.5
-            else:
-                up_ratio = 0.5
+        # 1) base 경로: 튐만 제한, 모양은 유지
+        prev = cur
+        for row in base:
+            v = _n(row.get("price"), prev) or prev
+            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동 ±30% 초과만 제한
+            v = min(max(v, lo_abs), hi_abs)             # 극단 이상치만 클립
+            row["price"] = round(v, 2)
+            prev = v
 
-            bull_price = round(b_stat * math.exp(band), 2)
-            bear_price = round(b_stat * math.exp(-band), 2)
-
-            p = 0.5 + _AI_TILT_WEIGHT * (up_ratio - 0.5)
-            p = min(max(p, 0.0), 1.0)
-            log_base = (1 - p) * math.log(bear_price) + p * math.log(bull_price)
-            base_price = round(math.exp(log_base), 2)
-            new_base_prices.append(base_price)
-
+        # 2) bull/bear 스프레드: 뒤로 갈수록 '반드시' 벌어지게(단조 증가). 상·하방 비대칭은 유지.
+        base_sp, grow = 0.02, 0.024                     # 2% → 6개월차 약 14%
+        spu_prev = spd_prev = 0.0
+        for i, row in enumerate(base):
+            b = row["price"]
+            gu = _n((bull[i] or {}).get("price")) if i < len(bull) else None
+            gd = _n((bear[i] or {}).get("price")) if i < len(bear) else None
+            spu = base_sp + grow * i
+            spd = base_sp + grow * i
+            if gu and gu > b:                           # AI 가 더 넓게 봤으면 그만큼 반영
+                spu = max(spu, gu / b - 1)
+            if gd and gd < b:
+                spd = max(spd, 1 - gd / b)
+            # 매달 최소 1.2%p 는 더 벌어지게(단조 증가 + 실제로 '점점' 넓어지는 팬), 상한 50%
+            spu = min(max(spu, spu_prev + 0.012 if i else spu), 0.5)
+            spd = min(max(spd, spd_prev + 0.012 if i else spd), 0.5)
+            spu_prev, spd_prev = spu, spd
             if i < len(bull):
-                bull[i]["price"] = bull_price
-            else:
-                bull.append({**bull_row, "price": bull_price})
+                bull[i]["price"] = round(min(b * (1 + spu), hi_abs * 1.3), 2)
             if i < len(bear):
-                bear[i]["price"] = bear_price
-            else:
-                bear.append({**bear_row, "price": bear_price})
+                bear[i]["price"] = round(max(b * (1 - spd), lo_abs * 0.7), 2)
 
-            row = base[i] if i < len(base) else {}
-            row["price"] = base_price
-            if i >= len(base):
-                base.append(row)
-
-        c["monthly_forecast_base"] = base[:len(base_path)]
-        c["monthly_forecast_bull"] = bull[:len(base_path)]
-        c["monthly_forecast_bear"] = bear[:len(base_path)]
-
-        last = new_base_prices[-1]
+        last = base[-1]["price"]
         c["forecast_6m_target"] = round(last, 2)
         c["forecast_change_rate"] = f"{(last / cur - 1) * 100:+.1f}%"
-        c["stat_basis"] = {
-            "method": "forecast combination: statistical drift+volatility band weighted by AI bias",
-            "monthly_drift": cons.get("monthly_drift"),
-            "monthly_vol": cons.get("monthly_vol"),
-            "drift_damping": _DRIFT_DAMPING,
-            "band_confidence_z": _BAND_Z,
-            "ai_tilt_weight": _AI_TILT_WEIGHT,
-        }
+
 
 def fix_months(commodities: dict) -> None:
+    """AI 가 월 라벨을 어긋나게(순서 뒤섞임·과거월) 내는 경우가 있어,
+    update_date 다음 달부터 연속 6개월로 강제하고 배열은 6개로 자른다."""
     y, m, _ = (int(x) for x in update_date.split("-"))
     seq = []
     for _ in range(6):
@@ -445,7 +404,6 @@ def fix_months(commodities: dict) -> None:
         if m > 12:
             m, y = 1, y + 1
         seq.append(f"{y:04d}-{m:02d}")
-
     for k in COMMODITIES:
         c = commodities.get(k) or {}
         for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
@@ -454,7 +412,10 @@ def fix_months(commodities: dict) -> None:
                 r["month"] = seq[i]
             c[arr] = rows
 
+
 def fix_analogs(commodities: dict) -> None:
+    """유사국면의 수치(period·similarity·actual·miniHist·miniForecast)는 파이썬이 계산한
+    실제 값으로 강제하고, AI 에게서는 title·summary 만 취한다(1년·6개월 두 리스트)."""
     for k in COMMODITIES:
         c = commodities.get(k)
         if not c:
@@ -472,6 +433,7 @@ def fix_analogs(commodities: dict) -> None:
                 })
             c[field] = merged
 
+
 def validate(commodities: dict) -> None:
     need = {"name", "unit", "current_price", "forecast_6m_target",
             "monthly_forecast_base", "rationale_base"}
@@ -485,7 +447,10 @@ def validate(commodities: dict) -> None:
         if not commodities[k]["monthly_forecast_base"]:
             raise ValueError(f"{k} monthly_forecast_base 비어 있음")
 
+
 def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
+    """실행 간 '급변'만 억제한다(완만화 X). 같은 달의 직전 전망 대비
+    변화가 jump 를 넘으면 그 절반만 반영해 튐을 눌러준다. AI 경로 모양은 유지."""
     try:
         prev = json.load(open("raw_materials_forecast.json", encoding="utf-8"))["forecast_data"]
     except Exception:  # noqa: BLE001
@@ -503,35 +468,26 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
                     r["price"] = round((nv + target) / 2, 2)
 
 
-# ==============================================================================
-# 7. 실행 및 저장
-# ==============================================================================
-print("[진행] Gemini 시나리오 서술 생성…")
+print("[진행] Gemini 전망 생성…")
 try:
-    parsed_json_str = call_gemini(prompt)
-    parsed = json.loads(parsed_json_str)
-    
-    # 딕셔너리로 변환된 객체를 꺼내어 기존 코드에 주입
+    parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
-    
     validate(commodities)
-    fix_months(commodities)        
-    fix_analogs(commodities)       
-    sanitize_scenarios(commodities) 
-    clamp_vs_previous(commodities)   
+    fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
+    fix_analogs(commodities)         # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
+    clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
+    sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)
 
 output = {
-    "update_date": update_date,     
-    "prices_date": update_date,     
+    "update_date": update_date,   # AI 전망 생성일
+    "prices_date": update_date,   # 시세 갱신일 (prices.py 가 매일 덮어씀)
     "macro": macro,
-    "history_3y": history,          
+    "history_3y": history,        # (호환) 키 이름 유지
     "forecast_data": commodities,
 }
-
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
-
-print("[성공] raw_materials_forecast.json 저장 완료 (Structured Outputs 적용)")
+print("[성공] raw_materials_forecast.json 저장 완료")
