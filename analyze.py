@@ -16,7 +16,7 @@ import sys
 import time
 
 import pandas as pd
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, create_model
 
 from _common import (
     COMMODITIES, META, build_history, fetch_raw, latest_macro,
@@ -45,7 +45,33 @@ except ImportError:
     _NEW_SDK = False
 
 # ==============================================================================
-# 1. Pydantic 스키마 정의 (Structured Outputs용)
+# 1. 데이터 수집 및 COMMODITIES 확정
+# ==============================================================================
+raw = fetch_raw()
+history, spot = build_history(raw)
+if not any(history.values()):
+    sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
+
+# 야후에 없는 품목 수동 병합 -> COMMODITIES 리스트에 편입
+for _k, _rows in load_manual_history().items():
+    history[_k] = _rows
+    spot[_k] = _rows[-1]["price"]
+    if _k not in COMMODITIES:
+        COMMODITIES.append(_k)
+
+try:
+    _prev = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
+    for _k in COMMODITIES:
+        if not history.get(_k) and _prev.get(_k):
+            history[_k] = _prev[_k]
+            spot[_k] = _prev[_k][-1]["price"]
+            print(f"[경고] {_k}: 이번 수집 0행 → 직전 파일값 {len(_prev[_k])}행 보존")
+except Exception:  # noqa: BLE001
+    pass
+
+
+# ==============================================================================
+# 2. Pydantic 스키마 정의 (Structured Outputs 용)
 # ==============================================================================
 class MonthlyForecastBase(BaseModel):
     month: str = Field(description="예: '2026-09'")
@@ -95,36 +121,19 @@ class CommodityForecast(BaseModel):
     analogs: list[Analog]
     analogs_6m: list[Analog]
 
+# 💡 [핵심 해결책] dict(additionalProperties 허용 불가) 대신, 수집이 확정된 
+# COMMODITIES 의 키들(wti, copper 등)을 고정 필드로 갖는 Pydantic 모델을 동적 생성
+commodity_fields = {k: (CommodityForecast, ...) for k in COMMODITIES}
+CommoditiesModel = create_model('CommoditiesModel', **commodity_fields)
+
 class ForecastResponse(BaseModel):
     update_date: str = Field(description="생성 기준일")
-    commodities: dict[str, CommodityForecast] = Field(
-        description="wti, copper, aluminum 등 원자재 영문키를 가진 딕셔너리"
-    )
+    commodities: CommoditiesModel
+
 
 # ==============================================================================
-# 2. 데이터 수집 및 통계적 기준선 계산 (기존 코드 유지)
+# 3. 통계적 기준선 및 과거 유사 궤적 연산
 # ==============================================================================
-raw = fetch_raw()
-history, spot = build_history(raw)
-if not any(history.values()):
-    sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
-
-for _k, _rows in load_manual_history().items():
-    history[_k] = _rows
-    spot[_k] = _rows[-1]["price"]
-    if _k not in COMMODITIES:
-        COMMODITIES.append(_k)
-
-try:
-    _prev = json.load(open("raw_materials_forecast.json", encoding="utf-8")).get("history_3y", {})
-    for _k in COMMODITIES:
-        if not history.get(_k) and _prev.get(_k):
-            history[_k] = _prev[_k]
-            spot[_k] = _prev[_k][-1]["price"]
-            print(f"[경고] {_k}: 이번 수집 0행 → 직전 파일값 {len(_prev[_k])}행 보존")
-except Exception:  # noqa: BLE001
-    pass
-
 history_brief = {}
 for k, rows in history.items():
     step = max(1, len(rows) // 70)
@@ -262,8 +271,9 @@ FACTORS = {
     "tungsten": "매크로: 절삭공구(제조업 CAPEX), 방산. 마이크로: 중국 수출쿼터/통제, APT 고시가, 서방 공급망 다변화",
 }
 
+
 # ==============================================================================
-# 3. Prompt 작성 (구조화 스키마 설명 제거, 역할/규칙만 명시)
+# 4. 프롬프트 정의
 # ==============================================================================
 _KEYS_STR = ", ".join(COMMODITIES)
 
@@ -293,6 +303,7 @@ market_input.conservative_base 는 "AI 개입 없는 순수 통계 중심선"(�
  - 금/은: Connector, FPCB, PCB, Cable 등 핵심 전장부품에 사용됨.
  - 백금: 단결정 생산 설비용으로 직접적 연관은 적으나 추이 모니터링.
  - 열연강판/철광석: 시스템 Frame, Bracket 및 협력사 판금가공품(SPCC 냉연강판)의 기초자재. 통상 1~2개월 후행하여 전가되므로 가격 변곡점 시기 협상 전략 제시 필요.
+ - 니켈/아연/텅스텐: 지정학적 요인과 수출 쿼터 등 공급 리스크에 민감하게 대응.
 
 [실제 과거 유사국면 1년/6개월 데이터]
 {json.dumps(analogs_real, ensure_ascii=False)}
@@ -306,7 +317,7 @@ market_input.conservative_base 는 "AI 개입 없는 순수 통계 중심선"(�
 """
 
 # ==============================================================================
-# 4. Gemini API 호출 (Structured Outputs 적용)
+# 5. Gemini API 호출
 # ==============================================================================
 def call_gemini(text: str) -> str:
     last = None
@@ -317,7 +328,7 @@ def call_gemini(text: str) -> str:
                 if _NEW_SDK:
                     cfg = types.GenerateContentConfig(
                         response_mime_type="application/json",
-                        response_schema=ForecastResponse, # 👈 Pydantic 스키마 주입
+                        response_schema=ForecastResponse, # 동적으로 생성된 Pydantic 주입
                         temperature=0.35,
                         top_p=0.9,
                         automatic_function_calling={"disable": True},
@@ -330,7 +341,6 @@ def call_gemini(text: str) -> str:
                     )
                     return r.text
                 else:
-                    # Legacy SDK fallback (스키마 강제 미지원 모델 대비 프롬프트에 의존)
                     m = _legacy.GenerativeModel(model)
                     return m.generate_content(
                         text,
@@ -354,7 +364,7 @@ def _n(v, d=None):
         return d
 
 # ==============================================================================
-# 5. 후처리 및 결합 (기존 로직 유지 - 완벽히 작동함)
+# 6. 통계 혼합 및 결과 후처리 (기존 로직 유지)
 # ==============================================================================
 def sanitize_scenarios(commodities: dict) -> None:
     for k in COMMODITIES:
@@ -494,10 +504,16 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
                     target = pv * (1 + jump) if nv > pv else pv * (1 - jump)
                     r["price"] = round((nv + target) / 2, 2)
 
+
+# ==============================================================================
+# 7. 실행 및 저장
+# ==============================================================================
 print("[진행] Gemini 시나리오 서술 생성…")
 try:
     parsed_json_str = call_gemini(prompt)
     parsed = json.loads(parsed_json_str)
+    
+    # 딕셔너리로 변환된 객체를 꺼내어 기존 코드에 주입
     commodities = parsed["commodities"]
     
     validate(commodities)
@@ -520,4 +536,4 @@ output = {
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 
-print("[성공] raw_materials_forecast.json 저장 완료 (Pydantic 구조화 출력 적용)")
+print("[성공] raw_materials_forecast.json 저장 완료 (Structured Outputs 적용)")
