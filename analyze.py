@@ -166,23 +166,31 @@ analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}      # 1년 비교
 analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}    # 6개월 비교
 
 
-# ── 통계적 base 경로 + 변동성 기반 밴드 ──────────────────────────────────
+# ── 통계적 밴드(bull/bear 끝점) + 예측 결합(forecast combination) 기반 base ──
 # 기존 방식(AI 가 base 자체를 "그럴듯한 굴곡"으로 생성)은 실제 통계적 근거가
-# 약함. 대신:
-#   · base  = 현재가에서, 과거 로그수익률의 평균(드리프트)을 "약하게만"
-#             반영해 뻗어나가는 경로. 드리프트를 100% 반영하면 최근 추세를
-#             그대로 미래로 외삽하는 과신이 되므로 damping(<1)으로 눌러준다.
-#             ("금융 시계열은 단기적으로 예측 불가능에 가깝다"는 통념에 맞춘
-#             보수적 기준선 — 완전 랜덤워크(드리프트 0)와 추세추종의 중간.)
-#   · 밴드  = 과거 월간 로그수익률의 표준편차(σ)를 변동성 척도로 삼아,
-#             랜덤워크 가정 하의 표준적 스케일링(√t)으로 t개월 뒤 밴드폭을
-#             계산. z 값은 근사 신뢰수준(z=1.28 → 약 80% 구간)이며, 원자재별
-#             실제 변동성 차이를 그대로 반영한다(변동성 큰 니켈은 밴드가
-#             넓고, 변동성 낮은 금은 좁게 나옴).
-_DRIFT_DAMPING = 0.2   # 추세를 20%만 반영 (과신 방지)
-_DRIFT_WINDOW = 12     # 드리프트 추정에 쓸 최근 개월 수
-_VOL_WINDOW = 36       # 변동성(표준편차) 추정에 쓸 최근 개월 수(짧으면 있는 만큼 사용)
-_BAND_Z = 1.28         # 랜덤워크 밴드 신뢰수준 근사치 (약 80%)
+# 약함. 그렇다고 base 를 순수 과거데이터(드리프트)에만 묶어두면, 뉴스·정책·
+# 수급 같은 "과거 가격에는 없는 정보"를 완전히 버리게 되어 지나치게 밋밋해짐.
+#
+# → 두 정보를 통계적으로 결합(forecast combination, Bates & Granger 1969)한다:
+#   ① 통계 기준선: 과거 로그수익률 평균(드리프트)을 약하게(damping)만 반영한
+#      경로. 완전 랜덤워크(드리프트 0)와 추세추종의 중간.
+#   ② 밴드(변동성) : 과거 월간 로그수익률 표준편차(σ)를 랜덤워크 표준
+#      스케일링(√t)으로 늘려 t개월 뒤 "bull/bear 끝점"을 계산. 이 끝점은
+#      AI 가 절대 못 넘게 고정 — 밴드 폭 자체는 순수 통계치.
+#   ③ base 의 최종 위치 : ①(순수 통계 중심)과 ②의 두 끝점(bear~bull) 사이를
+#      AI 가 서술한 방향성 비대칭(어느 쪽 근거가 더 강한지)만큼 가중 이동시킨
+#      "가중 결합값"으로 잡는다. 이동 폭은 _AI_TILT_WEIGHT 로 제한하므로
+#      base 는 절대 통계적 밴드(bull~bear) 바깥으로 나가지 않는다.
+#      (= AI 의 판단을 반영하되, "밴드보다 더 튀는" 과신은 구조적으로 차단)
+_DRIFT_DAMPING = 0.2      # 순수 통계 중심(①)에서 추세를 20%만 반영 (과신 방지)
+_DRIFT_WINDOW = 12        # 드리프트 추정에 쓸 최근 개월 수
+_VOL_WINDOW = 36          # 변동성(표준편차) 추정에 쓸 최근 개월 수(짧으면 있는 만큼 사용)
+_BAND_Z = 1.28            # 랜덤워크 밴드 신뢰수준 근사치 (약 80%)
+_AI_TILT_WEIGHT = 0.5     # base 를 밴드 중심에서 bull/bear 쪽으로 얼마나 옮길지 (0~1, 확정값)
+                          # 0 = 순수 통계(AI 의견 무시), 1 = AI 비대칭 의견을 최대로 반영
+                          # (그래도 밴드 끝점은 못 넘음). 0.5 = "통계 절반 + AI 판단 절반"
+                          # 가중치로, 과거데이터에 없는 뉴스·정책 정보와 과거 변동성 기반
+                          # 통계를 동등한 비중으로 결합(forecast combination)한다는 의미.
 
 
 def _monthly_log_returns(key: str, window: int) -> list[float]:
@@ -317,21 +325,27 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의
 6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
-**중요 — base 가격은 이미 통계적으로 계산되어 market_input.conservative_base 에 주어져
-있습니다. 당신은 그 숫자를 그대로 monthly_forecast_base[].price 에 복사하고,
-"왜 이 수준일 것으로 보는지"에 대한 rationale(정성 설명, 한 문장)만 채우세요.
-base 가격 자체를 새로 만들거나 바꾸지 마세요.**
+**중요 — 가격 숫자는 당신이 만드는 게 아니라 이후 파이썬이 통계적으로 계산합니다.**
+market_input.conservative_base 는 "AI 개입 없는 순수 통계 중심선"(참고용)이고,
+실제 monthly_forecast_base/bull/bear 의 price 는 이후 코드가:
+  - bull/bear 끝점 = 통계 중심선 ± 과거 변동성 기반 밴드 (당신이 못 바꿈)
+  - base = 그 bull~bear 밴드 안에서, 당신이 아래에 적을 bull/bear 의 bias(상대적
+    방향성 강도)만큼 가중 이동한 위치
+로 재계산합니다. 즉 **당신의 역할은 숫자가 아니라 "방향성 판단(bias)"과 그 근거(rationale)
+서술**입니다. bull bias 가 bear bias 보다 (절대값 기준) 크면 base 는 자동으로 bull 쪽에
+더 가깝게 이동하니, 진짜 우상향/우하향으로 본다면 bias 크기 차이로 그 확신을 표현하세요.
 
 규칙:
 - monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
-- monthly_forecast_base 의 price 는 conservative_base 값을 그대로 사용, rationale 만 작성.
-- monthly_forecast_bull/bear 는 price 대신 base 대비 편차(bias, 예: "+8.5%", "-6.2%")만
-  제시하세요. 실제 폭(밴드)은 이후 파이썬이 과거 변동성 기반으로 재계산하며, 당신이 준
-  bias 의 "방향성과 상대적 크기"(어느 달에 더 벌어지는지, 상방/하방 중 어느 쪽이 더 큰지)만
-  참고합니다. 즉 bias 의 절대값보다 "이번 달이 저번달보다 더 벌어지는가", "이번 이벤트로
-  상방이 하방보다 더 큰가" 같은 상대적 패턴이 중요합니다.
+- monthly_forecast_base 의 price 필드는 아무 값이나 넣어도 무방(어차피 재계산됨).
+  대신 rationale 에는 "왜 이번 달이 상방/하방 중 어느 쪽에 더 가까울지"를 서술하세요.
+- monthly_forecast_bull/bear 는 price 대신 base 대비 편차(bias, 예: "+8.5%", "-6.2%")를
+  제시하세요. bias 의 절대 크기 자체는 이후 밴드폭 계산에 쓰이지 않고, **bull bias 와
+  bear bias 의 상대적 비율**(어느 쪽 근거가 더 강한지)만 base 위치를 정하는 데 쓰입니다.
+  따라서 정말 강하게 우상향으로 본다면 bull bias 를 bear bias 보다 뚜렷하게 크게 잡으세요
+  (예: bull +15% vs bear -3% 처럼 비대칭을 크게).
 - 알려진 이벤트·계절성(OPEC+ 회의, 재고 사이클, 중국 정책 시점, FOMC 등)을 rationale/bias 에 반영.
-- 6개월 누적 변화폭(conservative_base 기준)은 이미 보수적으로 계산되어 있으므로 그대로 존중.
+- 시간이 갈수록(이벤트 불확실성이 큰 달일수록) bias 크기(상방/하방 비대칭)를 더 크게 가져가도 됩니다.
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
@@ -345,16 +359,16 @@ base 가격 자체를 새로 만들거나 바꾸지 마세요.**
   최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
   전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
   그 뒤에는 구매 담당자에게 조언하는 형태로 마무리해주면 될것같다.
-  우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음 (이걸 따로 답변에 명시할 필요 없음)
+  우리회사는 초음파 진단기기를 만드는 회사고, 구매담당자들은 그 제품을 구성하는 원자재를 구매하고있음
   직접 구매하거나, 우리 협력사가 구매하는 자재에 해당 원자재들이 하위 n차 단계에서 사용되니 그 영향을 미리 전망하고
   원자재가 변동을 자재 단가에 적시 반영하는것이 중요함. 가격이 오를 전망이면 우리회사에 미칠 영향을 미리 전망/Risk 헷징 전략세우고
   가격이 떨어질 전망이면 떨어지는 시점에 완제품 자재 가격에 반영되는 원자재가격을 적시 반영하는 것이 중요함
-  - WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 레진과 그 레진으로 만들어지는 플라스틱 Cover, 포장재(PE폼), 비닐류의 영향이 큼
+  - WTI의 경우 석유를 우리가 직접 사진 않지만, 석유로 만들어지는 플라스틱 Cover(레진 소재), 포장재(PE폼), 비닐류의 영향이 큼
   - 구리의 경우 Cable, Heatsink, Bracket 가격에 영향
   - 알루미늄은 주로 시스템의 Frame, Bracket 등 외장부품에 많이 사용됨
   - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
   - 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
-  - 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
+  - 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
 - 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum·silver USD/oz.t,
   steel USD/s.ton, ironore USD/dmt.
 
@@ -420,14 +434,21 @@ def _n(v, d=None):
 
 
 def sanitize_scenarios(commodities: dict) -> None:
-    """base 는 통계적으로 확정된 conservative_base 값으로 강제 치환하고,
-    bull/bear 는 AI 가 준 bias(상대적 비대칭)를 참고해 과거 변동성 기반 밴드로 재계산한다.
+    """bull/bear 는 통계적 변동성 밴드의 '끝점'으로 고정하고(AI 가 못 벗어남),
+    base 는 그 밴드(bear~bull) 안에서 AI 가 서술한 방향성 비대칭만큼 가중 이동한
+    '예측 결합(forecast combination)' 값으로 계산한다.
 
-    - base: conservative[k]["base"] 로 완전히 덮어씀 (AI 숫자 무시, rationale 텍스트만 채택)
-    - bull/bear 밴드: vol_up/vol_dn(√t 스케일링된 변동성 밴드)을 기본으로 하되,
-      AI 가 bias 로 표현한 상방/하방 비대칭 비율이 있으면 그 비율만큼 밴드를 상방/하방으로
-      기울여 반영한다(밴드의 '전체 폭'은 통계량이 결정, '기울기'만 AI 서술 반영).
-    - forecast_6m_target / change_rate 재계산
+    절차 (각 월 i 마다):
+      1. b_stat  = conservative[k]["base"][i]        (순수 통계 중심 — 드리프트만 반영)
+      2. band    = conservative[k]["vol_up"][i]       (= vol_dn[i], √t 스케일링된 변동성)
+      3. bull_끝점 = b_stat * exp(+band), bear_끝점 = b_stat * exp(-band)  ← 이 두 값은
+         AI 개입 없이 순수 통계로 고정. bull/bear 가격은 그대로 이 값을 씀.
+      4. AI 가 준 bull/bear bias(상대적 방향성 강도)로 up_ratio(0~1, 0.5=대칭)를 구하고,
+         base 는 bear_끝점~bull_끝점 사이를
+           position p = 0.5 + _AI_TILT_WEIGHT * (up_ratio - 0.5)
+         지점으로 잡는다(로그 스케일 가중평균). up_ratio 가 0.5(대칭)면 base=b_stat 그대로,
+         AI 가 강하게 상방을 시사할수록 base 가 bull 쪽으로 붙는다.
+         _AI_TILT_WEIGHT 가 이동 한도를 결정 — base 는 절대 밴드 밖으로 못 나간다.
     """
     for k in COMMODITIES:
         c = commodities[k]
@@ -445,45 +466,35 @@ def sanitize_scenarios(commodities: dict) -> None:
         bull = c.get("monthly_forecast_bull") or []
         bear = c.get("monthly_forecast_bear") or []
 
-        # base 가격을 통계적 경로로 강제 치환 (rationale 텍스트는 AI 것 유지)
+        new_base_prices = []
         for i in range(len(base_path)):
-            row = base[i] if i < len(base) else {}
-            row["price"] = base_path[i]
-            if i >= len(base):
-                base.append(row)
-        c["monthly_forecast_base"] = base[:len(base_path)]
-
-        # bull/bear: 통계적 밴드(vol_up/vol_dn)를 기본 폭으로, AI 의 bias 비율로
-        # 상/하 비대칭만 반영 (밴드 절대 폭 자체를 AI 가 부풀리지 못하게 함)
-        for i in range(len(base_path)):
-            b = base_path[i]
-            up_band = vol_up[i]
-            dn_band = vol_dn[i]
+            b_stat = base_path[i]
+            band = vol_up[i]  # == vol_dn[i], √t 스케일링된 변동성 밴드 반경(log 기준)
 
             bull_row = bull[i] if i < len(bull) else {}
             bear_row = bear[i] if i < len(bear) else {}
             ai_up_bias = _n(str(bull_row.get("bias", "")).replace("%", ""), None)
             ai_dn_bias = _n(str(bear_row.get("bias", "")).replace("%", ""), None)
 
-            # AI 가 상/하 비대칭을 시사했으면(둘 다 있을 때) 그 비율로 밴드를 기울임.
-            # 예: ai_up=10, ai_dn=4 면 상방이 하방의 2.5배 -> 통계적 총 밴드폭을
-            # 유지한 채 상/하로 나눠 재배분. 정보가 없으면 대칭(50:50).
+            # AI 가 상/하 비대칭을 시사했으면 그 상대적 크기로 up_ratio 산출.
+            # 예: bull bias=+10%, bear bias=-4% -> 상방 근거가 더 강함 -> up_ratio≈0.71
             if ai_up_bias is not None and ai_dn_bias is not None:
                 au, ad = abs(ai_up_bias), abs(ai_dn_bias)
                 total = au + ad
-                if total > 0:
-                    up_ratio = au / total
-                else:
-                    up_ratio = 0.5
+                up_ratio = (au / total) if total > 0 else 0.5
             else:
                 up_ratio = 0.5
 
-            total_band = up_band + dn_band
-            up_band = total_band * up_ratio
-            dn_band = total_band * (1 - up_ratio)
+            # bull/bear 끝점(순수 통계, 고정)
+            bull_price = round(b_stat * math.exp(band), 2)
+            bear_price = round(b_stat * math.exp(-band), 2)
 
-            bull_price = round(b * math.exp(up_band), 2)
-            bear_price = round(b * math.exp(-dn_band), 2)
+            # base = 밴드 안에서 AI 비대칭만큼 가중 이동한 위치 (예측 결합)
+            p = 0.5 + _AI_TILT_WEIGHT * (up_ratio - 0.5)
+            p = min(max(p, 0.0), 1.0)
+            log_base = (1 - p) * math.log(bear_price) + p * math.log(bull_price)
+            base_price = round(math.exp(log_base), 2)
+            new_base_prices.append(base_price)
 
             if i < len(bull):
                 bull[i]["price"] = bull_price
@@ -494,19 +505,27 @@ def sanitize_scenarios(commodities: dict) -> None:
             else:
                 bear.append({**bear_row, "price": bear_price})
 
+            row = base[i] if i < len(base) else {}
+            row["price"] = base_price
+            if i >= len(base):
+                base.append(row)
+
+        c["monthly_forecast_base"] = base[:len(base_path)]
         c["monthly_forecast_bull"] = bull[:len(base_path)]
         c["monthly_forecast_bear"] = bear[:len(base_path)]
 
-        last = base_path[-1]
+        last = new_base_prices[-1]
         c["forecast_6m_target"] = round(last, 2)
         c["forecast_change_rate"] = f"{(last / cur - 1) * 100:+.1f}%"
         # 근거 화면 하단 표기용 — 이번에 계산에 쓴 통계량을 그대로 노출
         c["stat_basis"] = {
-            "method": "conservative log-drift base + sqrt(t) volatility band",
+            "method": "forecast combination: statistical drift+volatility band (endpoints) "
+                      "weighted by AI directional bias (base position)",
             "monthly_drift": cons.get("monthly_drift"),
             "monthly_vol": cons.get("monthly_vol"),
             "drift_damping": _DRIFT_DAMPING,
             "band_confidence_z": _BAND_Z,
+            "ai_tilt_weight": _AI_TILT_WEIGHT,
         }
 
 

@@ -1,4 +1,30 @@
-"""analyze.py(주간 AI 전망)와 prices.py(일간 시세 갱신)가 공유하는 수집 로직."""
+"""analyze.py(주간 AI 전망)와 prices.py(일간 시세 갱신)가 공유하는 수집 로직.
+
+── 이 파이프라인 전체에서 쓰는 통계적 가정 요약 ──────────────────────────
+(실제 정의/계산은 각 파일에 있고, 여기는 한눈에 보기 위한 요약)
+
+[이상치 탐지 — 이 파일, _despike_tail]
+  · 최근 20영업일(_MAD_WINDOW) 의 median·MAD(중앙값절대편차) 기준
+    robust z-score 가 3.5(_MAD_THRESHOLD) 초과인 마지막 값만 이상치로 잘라냄.
+  · 고정 %가 아니라 원자재별 실제 변동성을 반영(변동성 큰 니켈은 덜 민감하게,
+    변동성 낮은 금은 더 민감하게 반응).
+
+[base(중심 전망) — analyze.py, conservative_forecast / sanitize_scenarios]
+  · 통계 중심선: 최근 12개월(_DRIFT_WINDOW) 평균 로그수익률(드리프트)의 20%
+    (_DRIFT_DAMPING)만 반영 — 추세를 그대로 미래로 외삽하는 과신 방지.
+  · 밴드(bull/bear 끝점): 최근 36개월(_VOL_WINDOW) 로그수익률 표준편차(σ)를
+    랜덤워크 √t 스케일링, z=1.28(_BAND_Z, 약 80% 구간)로 t개월 뒤 밴드 계산.
+    이 끝점은 AI 가 못 건드리는 순수 통계값.
+  · base 의 최종 위치: 위 밴드(bear~bull) 안에서 AI 가 서술한 방향성 비대칭
+    (bull/bear bias 상대 비율)만큼 가중 이동. 가중치 _AI_TILT_WEIGHT=0.5로
+    확정 — "과거 데이터 기반 통계"와 "뉴스·정책 등 AI 판단"을 절반씩 결합
+    (예측 결합, forecast combination). base 는 절대 밴드 밖으로 못 나감.
+
+[유사국면(analogs) — analyze.py, top_analogs]
+  · 정량적 예측 근거가 아니라 AI 서술(사건명·요약)을 위한 참고 자료로만 취급
+    (표본이 적은 슬라이딩 윈도우 상관은 데이터 스누핑·허위상관 위험이 있음).
+─────────────────────────────────────────────────────────────────────
+"""
 
 from __future__ import annotations
 
