@@ -27,10 +27,9 @@ API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
-# 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
+# 💡 [수정됨] 에러 로그의 권장사항에 따라 최신 모델인 gemini-3.6-flash 로 업데이트
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
-    "gemini-2.5-flash",
-    "gemini-flash-lite-latest",
+    "gemini-3.6-flash",
     "gemini-flash-latest",
 ]
 
@@ -121,8 +120,6 @@ class CommodityForecast(BaseModel):
     analogs: list[Analog]
     analogs_6m: list[Analog]
 
-# 💡 [핵심 해결책] dict(additionalProperties 허용 불가) 대신, 수집이 확정된 
-# COMMODITIES 의 키들(wti, copper 등)을 고정 필드로 갖는 Pydantic 모델을 동적 생성
 commodity_fields = {k: (CommodityForecast, ...) for k in COMMODITIES}
 CommoditiesModel = create_model('CommoditiesModel', **commodity_fields)
 
@@ -333,7 +330,8 @@ def call_gemini(text: str) -> str:
                         top_p=0.9,
                         automatic_function_calling={"disable": True},
                     )
-                    if "2.5" in model or "gemini-3" in model:
+                    # 모델 이름 체크조건도 유연하게 변경
+                    if "3" in model or "2.5" in model:
                         cfg.thinking_config = {"thinking_budget": 0}
                     
                     r = _client.models.generate_content(
