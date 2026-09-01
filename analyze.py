@@ -186,6 +186,67 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
     return out
 
 
+def calculate_statistical_bounds(key: str, months_ahead: int = 6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """자산의 역사적 데이터를 기반으로 로그수익률의 Drift와 Volatility를 산출하고,
+    Geometric Random Walk 가정 하에서 향후 months_ahead 개월 동안의 80% 신뢰밴드(Z=1.28)를 계산합니다.
+    """
+    m_raw, mult = _monthly_series(key)
+    spot_price = spot.get(key)
+    
+    # 최소 12개월 이상의 데이터가 필요함 (없으면 기본값으로 대체)
+    if m_raw is None or len(m_raw) < 12:
+        # 데이터가 부족하면 기본 spot 값에 연간 변동성 25% 가정하여 선형 밴드 구축
+        s_price = spot_price or 100.0
+        vol_array = 0.10 * np.sqrt(np.arange(1, months_ahead + 1))
+        base_path = s_price * np.ones(months_ahead)
+        bull_path = s_price * (1.0 + 1.28 * vol_array)
+        bear_path = s_price * (1.0 - 1.28 * vol_array)
+        return base_path, bull_path, bear_path
+
+    m = m_raw * mult
+    if not spot_price:
+        spot_price = m.iloc[-1]
+
+    # 최근 36개월의 월별 로그수익률 계산 (장기 변동성)
+    m_recent = m.iloc[-36:] if len(m) > 36 else m
+    log_returns = np.log(m_recent / m_recent.shift(1)).dropna()
+
+    # 최근 12개월의 평균 로그수익률 (Drift)
+    m_12 = m.iloc[-12:] if len(m) > 12 else m
+    log_returns_12 = np.log(m_12 / m_12.shift(1)).dropna()
+    
+    # 12개월 평균 로그수익률의 20% Damping 적용 (Drift 제어)
+    drift = log_returns_12.mean() * 0.20 if len(log_returns_12) > 0 else 0.0
+
+    # 36개월 로그수익률의 표준편차 (장기 월간 변동성)
+    vol_36 = log_returns.std() if len(log_returns) > 0 else 0.05
+    
+    # 최근 6개월 로그수익률의 표준편차 (단기 월간 변동성)
+    m_6 = m.iloc[-6:] if len(m) > 6 else m
+    log_returns_6 = np.log(m_6 / m_6.shift(1)).dropna()
+    vol_6 = log_returns_6.std() if len(log_returns_6) > 0 else vol_36
+    
+    # 장기와 단기 변동성을 50:50으로 혼합하여 최근 급등락 시 즉각적으로 밴드가 팽창하도록 반영 (EMA/가중치 혼합 효과)
+    vol = 0.5 * vol_36 + 0.5 * vol_6
+    # 최하 변동성 하한 1.5% 부여
+    vol = max(vol, 0.015)
+    
+    base_path = np.zeros(months_ahead)
+    bull_path = np.zeros(months_ahead)
+    bear_path = np.zeros(months_ahead)
+    
+    # Random Walk √t 스케일링, Z=1.28 (약 80% 구간)
+    for t in range(1, months_ahead + 1):
+        mean_log = np.log(spot_price) + drift * t
+        vol_term = 1.28 * vol * np.sqrt(t)
+        
+        base_path[t - 1] = np.exp(mean_log)
+        bull_path[t - 1] = np.exp(mean_log + vol_term)
+        bear_path[t - 1] = np.exp(mean_log - vol_term)
+        
+    return base_path, bull_path, bear_path
+
+
 analogs_real = {k: top_analogs(k, 12) for k in COMMODITIES}      # 1년 비교
 analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}     # 6개월 비교
 
@@ -240,6 +301,9 @@ FACTORS = {
     "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공우주 수요, 미·중 갈등. "
                 "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
                 "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
+    "silicon": "매크로: 중국 제조업 PMI, 글로벌 철강 수요 (합금철 원료), 석탄 및 전력 단가 (제조 에너지 비용), 달러·위안화. "
+               "마이크로: Ferro Silicon (FeSi 75%) 중국 생산량 및 가동률, 중국 수출 관세 정책, 주요 철강 제련소(포스코 등) 계약단가 추이, "
+               "중국 FOB 선적 요율, 규석(원료) 및 전극봉 가격, 글로벌 자동차 알루미늄 다이캐스팅 수요",
 }
 
 SCHEMA_ONE = """{
@@ -286,7 +350,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - 6개월 누적 변화폭은 대체로 ±25% 이내(초강세/초약세 국면이면 근거와 함께 초과 가능).
 - badge 는 danger/warning/success/secondary 중 하나. cat 은 공급/수요/투자/매크로 중 하나.
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
-  6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치와 단위,
+  6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치 and 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
 - analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
   각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
@@ -306,13 +370,14 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - 금은 Connector와 FPCB, PCB, Cable 등 다양한 곳에 사용되고 있고, 은도 일부 Connector에 사용됨
 - 백금은 단결정의 생산 설비에 사용되므로 우리에게 직접 영향이 있지는 않음
 - 열연강판,철광석은 시스템 Frame·Bracket, 협력사 판금 가공품(SPCC 냉연강판)의 상위 원자재로, 방향성 참고용. 열연 HRC → 냉연 SPCC 로 통상 1~2개월 후행 전가됨
-- 단위: wti USD/bbl, copper·aluminum USD/ton, gold·platinum·silver USD/oz.t,
-  steel USD/s.ton, ironore USD/dmt.
+- 실리콘은 Ferro Silicon 합금철 원료로, 프레임/브라켓 등 외장부품 제작에 간접 반영됨.
+- 단위: wti USD/bbl, copper·aluminum·nickel·zinc·silicon USD/ton, gold·platinum USD/ozt, silver US￠/ozt, tungsten RMB/mt, steel USD/s.ton, ironore USD/ton.
 - 구리, 알루미늄, 금, 은의 경우 케이블, 히트싱크, 커넥터, 프레임 등 협력사 단가에 즉각 반영되는 품목임. 공급망 차질뉴스 (광산 파업, 제련소 이슈)에 매우 민감하게 반응하도록 
-  가중치를 더 부요할 필요가 있고, 단기 급등시 선제 구매를 통한 헷징의 필요성이 있음
+  가중치를 더 부여할 필요가 있고, 단기 급등시 선제 구매를 통한 헷징의 필요성이 있음
 - 철광석, 열연강판, WTI 등은 프레임, 브라켓 단가로 반영되기까지 2개월 정도의 시차가 있음. 가격 하락기에 진입할 때엔 협력사의 단가 인하 협상을 준비할 타이밍을 구체적으로 짚어주는 것이 중요함
-- 텅스텐, 니켈, 아연은 중국의 수출통제나 특정 국가(인도네시아 등)의 정책에 따라 가격이 요동침. 매크로 지표보다 지정학적 리스크와 수출 통제 뉴스가 발생할 경우 Bull Band 상단으로 극단적인 상향조정 하는 규칙이필요함.
-- 최근 변동성 가중(EMA)를 반영하여, Bull/Bear 밴드는 최근 3~6개월의변동성에 더 큰 가중치를 두는 지수이동평균을 사용하거나 최근 12개월 변동성을 혼합하여, 최근 원자재가격이
+- 텅스텐, 니켈, 아연은 중국의 수출통제나 특정 국가(인도네시아 등)의 정책에 따라 가격이 요동침. 매크로 지표보다 지정학적 리스크와 수출 통제 뉴스가 발생할 경우 Bull Band 상단으로 극단적인 상향조정 하는 규칙이 필요함.
+- 실리콘은 중국의 전력 규제나 합금철 공장 가동률, 석탄 가격에 따라 단기 가격 왜곡이 크므로 에너지 뉴스 모니터링이 필수적임을 명시하십시오.
+- 최근 변동성 가중(EMA)를 반영하여, Bull/Bear 밴드는 최근 3~6개월의 변동성에 더 큰 가중치를 두는 지수이동평균을 사용하거나 최근 12개월 변동성을 혼합하여, 최근 원자재가격이
   급등락했을 경우, 다음달의 Bull/Bear밴드가 즉각적으로 넓어져 실제 시장의 불확실성을 더 잘 반영하게 해야
 
 [실제 과거 유사국면 (1년) — 실거래 가격궤적 유사도 분석]
@@ -377,61 +442,63 @@ def _n(v, d=None):
 
 
 def sanitize_scenarios(commodities: dict) -> None:
-    """AI 의 월별 경로 '모양'은 최대한 살리고, 병리적 케이스만 최소 개입으로 바로잡는다.
-    - 현재가는 spot 으로 고정
-    - 극단 이상치만 절대 밴드(spot 의 0.5~2.0배)로 클립
-    - 각 월에서 bear < base < bull 이 되도록 어긋난 쪽만 살짝 벌림(경로는 안 뭉갬)
-    - 월 변동이 ±30% 를 넘는 튐만 30% 로 제한
-    - forecast_6m_target / change_rate 재계산"""
+    """통계와 AI 의 하이브리드 예측 결합 모델(Forecast Combination)을 실행합니다.
+    1. 각 원자재별 최근 36개월 역사적 변동성(Volatility)과 12개월 로그수익률 추세(Drift)를 산출.
+    2. Geometric Random Walk 하에서 80% 신뢰 수준(Z=1.28)의 통계적 밴드(bull/bear)를 √t 스케일링으로 생성.
+    3. AI 가 제시한 base 가격과 통계적 base 가격을 50:50으로 블렌딩 (가중치 0.5).
+    4. 블렌딩된 base 가 통계적 bull/bear 밴드를 이탈하지 않도록 클리핑.
+    5. 최종 bull/bear 끝점은 순수 통계값(최종 밴드)으로 고정하여 자산 고유의 변동성을 완벽히 반영.
+    """
     for k in COMMODITIES:
-        c = commodities[k]
-        base = c.get("monthly_forecast_base") or []
-        bull = c.get("monthly_forecast_bull") or []
-        bear = c.get("monthly_forecast_bear") or []
-        if not base:
+        c = commodities.get(k)
+        if not c:
             continue
-
+            
+        base_ai = c.get("monthly_forecast_base") or []
+        bull_ai = c.get("monthly_forecast_bull") or []
+        bear_ai = c.get("monthly_forecast_bear") or []
+        if not base_ai:
+            continue
+            
         cur = spot.get(k) or _n(c.get("current_price"))
         if not cur or cur <= 0:
-            cur = _n(base[0].get("price"), 1.0)
+            cur = _n(base_ai[0].get("price"), 1.0)
         c["current_price"] = round(cur, 2)
-
-        lo_abs, hi_abs = cur * 0.5, cur * 2.0
-
-        # 1) base 경로: 튐만 제한, 모양은 유지
-        prev = cur
-        for row in base:
-            v = _n(row.get("price"), prev) or prev
-            v = min(max(v, prev * 0.7), prev * 1.3)     # 월 변동 ±30% 초과만 제한
-            v = min(max(v, lo_abs), hi_abs)             # 극단 이상치만 클립
-            row["price"] = round(v, 2)
-            prev = v
-
-        # 2) bull/bear 스프레드: 뒤로 갈수록 '반드시' 벌어지게(단조 증가). 상·하방 비대칭은 유지.
-        base_sp, grow = 0.02, 0.024                     # 2% → 6개월차 약 14%
-        spu_prev = spd_prev = 0.0
-        for i, row in enumerate(base):
-            b = row["price"]
-            gu = _n((bull[i] or {}).get("price")) if i < len(bull) else None
-            gd = _n((bear[i] or {}).get("price")) if i < len(bear) else None
-            spu = base_sp + grow * i
-            spd = base_sp + grow * i
-            if gu and gu > b:                           # AI 가 더 넓게 봤으면 그만큼 반영
-                spu = max(spu, gu / b - 1)
-            if gd and gd < b:
-                spd = max(spd, 1 - gd / b)
-            # 매달 최소 1.2%p 는 더 벌어지게(단조 증가 + 실제로 '점점' 넓어지는 팬), 상한 50%
-            spu = min(max(spu, spu_prev + 0.012 if i else spu), 0.5)
-            spd = min(max(spd, spd_prev + 0.012 if i else spd), 0.5)
-            spu_prev, spd_prev = spu, spd
-            if i < len(bull):
-                bull[i]["price"] = round(min(b * (1 + spu), hi_abs * 1.3), 2)
-            if i < len(bear):
-                bear[i]["price"] = round(max(b * (1 - spd), lo_abs * 0.7), 2)
-
-        last = base[-1]["price"]
-        c["forecast_6m_target"] = round(last, 2)
-        c["forecast_change_rate"] = f"{(last / cur - 1) * 100:+.1f}%"
+        
+        # 1단계: 역사적 데이터를 기반으로 통계적 중심선 및 밴드 계산
+        stat_base, stat_bull, stat_bear = calculate_statistical_bounds(k, months_ahead=6)
+        
+        # 2단계: AI 경로 블렌딩 및 밴드 내 고정
+        prev_price = cur
+        for i, row in enumerate(base_ai):
+            ai_val = _n(row.get("price"), prev_price)
+            # 월별 변동폭 ±30% 제한 장치
+            ai_val = min(max(ai_val, prev_price * 0.7), prev_price * 1.3)
+            
+            s_base = stat_base[i]
+            s_bull = stat_bull[i]
+            s_bear = stat_bear[i]
+            
+            # 50:50 블렌딩 (통계 50% + AI 50%)
+            blended_base = 0.5 * ai_val + 0.5 * s_base
+            
+            # 통계적 밴드를 벗어나지 못하도록 제한 (최소 1.5% 완충지대 확보)
+            buffer = s_base * 0.015
+            clamped_base = min(max(blended_base, s_bear + buffer), s_bull - buffer)
+            
+            row["price"] = round(clamped_base, 2)
+            prev_price = clamped_base
+            
+            # 최종 bull/bear 에는 자산별 실제 변동성이 반영된 통계적 끝값 주입
+            if i < len(bull_ai):
+                bull_ai[i]["price"] = round(max(s_bull, clamped_base + buffer), 2)
+            if i < len(bear_ai):
+                bear_ai[i]["price"] = round(min(s_bear, clamped_base - buffer), 2)
+                
+        # 3단계: 6개월 타겟값 및 변화율 재산출
+        last_price = base_ai[-1]["price"]
+        c["forecast_6m_target"] = round(last_price, 2)
+        c["forecast_change_rate"] = f"{(last_price / cur - 1) * 100:+.1f}%"
 
 
 def fix_months(commodities: dict) -> None:
