@@ -303,7 +303,7 @@ FACTORS = {
             "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
     "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공우주 수요, 미·중 갈등. "
                 "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
-                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
+                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공망 다변화",
     "silicon": "매크로: 중국 제조업 PMI, 글로벌 철강 수요 (합금철 원료), 석탄 및 전력 단가 (제조 에너지 비용), 달러·위안화. "
                "마이크로: Ferro Silicon (FeSi 75%) 중국 생산량 및 가동률, 중국 수출 관세 정책, 주요 철강 제련소(포스코 등) 계약단가 추이, "
                "중국 FOB 선적 요율, 규석(원료) 및 전극봉 가격, 글로벌 자동차 알루미늄 다이캐스팅 수요",
@@ -355,7 +355,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치 and 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs halls 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
+- analogs는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
   각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
   period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
   title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
@@ -442,6 +442,94 @@ def _n(v, d=None):
         return float(v)
     except (TypeError, ValueError):
         return d
+
+
+def calculate_ewma_vol_percentile(key: str) -> float:
+    """최근 24개월(2년)간의 일간 로그수익률 데이터를 기반으로 EWMA(지수가중이동평균, lambda=0.94)
+    연율화 변동성을 산출한 후, 최근 2년 변동성 분포 대비 현재 변동성의 백분위(Percentile, 0~100%)를 계산합니다.
+    """
+    # 1. 일간 가격 데이터 확보
+    s = raw.get(key)
+    if s is not None and len(s) > 20:
+        prices = s.dropna()
+    else:
+        # 야후에 없거나 수동 데이터인 경우 history rows 사용
+        rows = history.get(key) or []
+        if len(rows) < 20:
+            return 50.0  # 데이터가 너무 부족하면 보통(50%)으로 반환
+        prices = pd.Series(
+            {pd.Timestamp(r["date"]): float(r["price"]) for r in rows if r.get("price")}
+        ).sort_index().dropna()
+
+    # 2. 일간 로그수익률 산출
+    returns = np.log(prices / prices.shift(1)).dropna()
+    if len(returns) < 10:
+        return 50.0
+
+    # 3. EWMA 분산 계산 (RiskMetrics 표준 lambda=0.94)
+    decay = 0.94
+    ewma_var = returns.pow(2).ewm(alpha=1 - decay, adjust=False).mean()
+    ewma_vol_daily = np.sqrt(ewma_var)
+    ewma_vol_annual = ewma_vol_daily * np.sqrt(252) * 100.0  # 백분율화 (%)
+
+    # 4. 최근 2년(약 504 영업일) 데이터 추출
+    recent_vol = ewma_vol_annual.iloc[-504:] if len(ewma_vol_annual) > 504 else ewma_vol_annual
+    if len(recent_vol) < 2:
+        return 50.0
+
+    current_vol = recent_vol.iloc[-1]
+    
+    # 5. 백분위(Percentile) 산출
+    less_equal_count = np.sum(recent_vol <= current_vol)
+    percentile = (less_equal_count / len(recent_vol)) * 100.0
+    return round(percentile, 1)
+
+
+def track_forecast_direction(commodities: dict) -> None:
+    """기존 raw_materials_forecast.json의 이전 전망 기조와 비교하여
+    예측 기조의 연속성(상승/하강 유지 또는 전환 발생) 및 연속 개수(Streak)를 계산합니다.
+    """
+    prev_data = {}
+    try:
+        if os.path.exists("raw_materials_forecast.json"):
+            with open("raw_materials_forecast.json", encoding="utf-8") as f:
+                prev_data = json.load(f).get("forecast_data") or {}
+    except Exception:  # noqa: BLE001
+        pass
+
+    for k in COMMODITIES:
+        c = commodities.get(k)
+        if not c:
+            continue
+            
+        cur_price = c.get("current_price") or 1.0
+        target_price = c.get("forecast_6m_target") or cur_price
+        
+        # 현재 전망 기조 판정 (상승 / 하강 / 보합)
+        if target_price > cur_price * 1.001:  # 0.1% 이상 상승 시 상승 기조
+            cur_stance = "상승"
+        elif target_price < cur_price * 0.999:  # 0.1% 이상 하락 시 하강 기조
+            cur_stance = "하강"
+        else:
+            cur_stance = "보합"
+
+        # 이전 데이터 조회
+        p = prev_data.get(k) or {}
+        prev_stance = p.get("direction_stance") or "상승"  # 기본값 상승
+        prev_streak = p.get("direction_streak") or 1       # 기본값 1
+        
+        # 상태 기조 변화 판정 및 Streak 업데이트
+        if cur_stance == prev_stance:
+            new_streak = prev_streak + 1
+            status_text = f"{cur_stance}방향 유지"
+        else:
+            new_streak = 1
+            status_text = f"전환 발생({prev_stance}➡️{cur_stance})"
+            
+        # 신규 필드 적재
+        c["direction_stance"] = cur_stance
+        c["direction_streak"] = new_streak
+        c["direction_status"] = status_text
 
 
 def sanitize_scenarios(commodities: dict) -> None:
@@ -587,6 +675,14 @@ try:
     fix_analogs(commodities)         # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
     clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
     sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
+    
+    # EWMA 변동성 백분위 산출 및 전망 방향성 추적 적용
+    for k in COMMODITIES:
+        c = commodities.get(k)
+        if c:
+            c["volatility_score"] = calculate_ewma_vol_percentile(k)
+            
+    track_forecast_direction(commodities)
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)
