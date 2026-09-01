@@ -12,18 +12,19 @@ const JSON_RAW =
 const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
 
 const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum",
-  "steel", "ironore", "nickel", "zinc", "tungsten"];
+  "steel", "ironore", "nickel", "zinc", "tungsten", "silicon"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
   gold: "금", silver: "은", platinum: "백금",
   steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
+  silicon: "실리콘",
 };
 // 현재가 카드에서 단위 옆에 표기할 시장/기준 (제목에서는 뺀다)
 const VENUE = {
-  wti: "NYMEX WTI Futures · USD/bbl", copper: "COMEX Copper Futures · USD/lb", aluminum: "COMEX Aluminum Futures · USD/mt",
-  gold: "COMEX Gold Futures · ", silver: "COMEX Silver Futures· USD/ozt", platinum: "NYMEX Futures· USD/ozt",
-  steel: "CME HRC Futures · USD/st", ironore: "CFR China", nickel: "LME Cash USD/ton", zinc: "LME Cash USD/ton",
-  tungsten: "China Spot RMB/mt",
+  wti: "NYMEX Futures · USD/bbl", copper: "LME 현물 · USD/ton", aluminum: "LME 현물 · USD/ton",
+  gold: "LBMA 현물 · USD/ozt", silver: "LBMA 현물 · US￠/ozt", platinum: "LPPM 현물 · USD/ozt",
+  steel: "CME HRC Futures · USD/s.ton", ironore: "칭다오항(CFR) Fines 현물 · USD/ton", nickel: "LME 현물 · USD/ton", zinc: "LME 현물 · USD/ton",
+  tungsten: "Oxide WO3 99.95% 중국 현물 · RMB/mt", silicon: "Ferro 75% 중국(FOB) 현물 · USD/ton",
 };
 // f.name / 라벨에서 괄호 부속(예: " (CME)") 제거
 const stripVenue = (s) => String(s || "").replace(/\s*\([^)]*\)\s*/g, " ").trim();
@@ -67,7 +68,7 @@ function setProvenance(d) {
   el.hidden = false;
 }
 
-/* 화면 표시용: ASCII 하이픈(-) → 진짜 마이너스(−) 로 치환 */
+/* 화면 표시용: ASCII 하이픈(-) → 진짜 마이너스(-) 로 치환 */
 function fmtSign(s) {
   return String(s == null ? "" : s).replace(/-/g, "−");
 }
@@ -194,7 +195,7 @@ function render() {
   const sign = currencySign(f.unit);
   const venue = VENUE[state.key] || (String(f.name || "").match(/\(([^)]+)\)/) || [])[1] || "";
 
-  // 현재가·전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
+  // 현재가 · 전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
   const hist = historyRows(state.key); // 이미 despike 됨
   const base = f.monthly_forecast_base || [];
   const spot =
