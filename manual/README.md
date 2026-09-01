@@ -47,4 +47,7 @@ date,price
 - 알루미늄 : USD/ton, LME 현물
 - 전기동 : USD/ton, LME 현물
 - 실리콘 : USD/ton, Ferro 75% 중국(FOB) 현물
-- 
+- 금 : USD/ozt, LBMA 현물
+- 은 : US￠/ozt, LBMA 현물
+- 백금 : USD/ozt, LPPM 현물
+- WTI : USD/bbl, NYMEX Futures
