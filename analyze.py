@@ -355,7 +355,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치 and 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
+- analogs halls 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
   각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
   period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
   title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
@@ -413,7 +413,7 @@ def call_gemini(text: str) -> str:
                         "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
                         "top_p": 0.9,
                     }
-                    if "2.5" in model or "gemini-3" in model:
+                    if "thinking" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
                     r = _client.models.generate_content(
                         model=model, contents=text,
