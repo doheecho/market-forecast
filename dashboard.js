@@ -219,6 +219,37 @@ function render() {
     advEl.hidden = true;
   }
 
+  // 가격 변동성 지수 상태 & 스타일 판정
+  const vol = Number(f.volatility_score) || 0;
+  let volStatus = "보통";
+  let volBadge = "success";
+  let volColor = "var(--green)";
+  if (vol > 70) {
+    volStatus = "높음";
+    volBadge = "danger";
+    volColor = "var(--up)";
+  } else if (vol < 30) {
+    volStatus = "낮음";
+    volBadge = "secondary";
+    volColor = "var(--muted)";
+  }
+
+  // 전망 방향성 변화 상태 & 스타일 판정
+  const dirStatus = f.direction_status || "상승방향 유지";
+  const dirStreak = f.direction_streak || 1;
+  let dirColor = "var(--text)";
+  let dirChipClass = "secondary";
+  if (dirStatus.includes("상승")) {
+    dirColor = "var(--up)";
+    dirChipClass = "up";
+  } else if (dirStatus.includes("하강")) {
+    dirColor = "var(--down)";
+    dirChipClass = "down";
+  } else if (dirStatus.includes("전환")) {
+    dirColor = "var(--accent)";
+    dirChipClass = "warning";
+  }
+
   document.getElementById("app").innerHTML = `
     <div class="cards">
       <div class="card">
@@ -227,14 +258,32 @@ function render() {
         <div class="sub">${escapeHtml(f.unit || "")}${venue ? " · " + escapeHtml(venue) : ""}</div>
       </div>
       <div class="card">
+        <div class="label" style="display: flex; justify-content: space-between; align-items: center;">
+          <span>가격 변동성 지수</span>
+          <span class="badge ${volBadge}" style="font-size: 10px; padding: 1px 6px; border-radius: 4px;">${volStatus}</span>
+        </div>
+        <div class="value" style="display: flex; align-items: baseline; gap: 4px;">
+          ${fmtNum(vol)}<span class="sub" style="font-size: 12px; font-weight: normal;">%</span>
+        </div>
+        <div class="progress-bar-container" style="width: 100%; height: 5px; background: rgba(128,128,128,0.15); border-radius: 3px; margin-top: 8px; overflow: hidden;">
+          <div class="progress-bar" style="width: ${vol}%; height: 100%; background: ${volColor}; border-radius: 3px; transition: width 0.3s;"></div>
+        </div>
+        <div class="sub" style="margin-top: 6px; font-size: 11px; cursor: help; display: flex; align-items: center; gap: 4px;" title="EWMA(지수가중이동평균) 기반 연율화 변동성의 최근 2년 내 백분위입니다. 값이 높을수록 최근 가격 변동 폭이 과거 대비 큰 편임을 의미하며, 구매 타이밍 판단 시 리스크 수준의 참고 지표로 활용됩니다. (70% 초과: 변동성 높음, 30~70%: 보통, 30% 이하: 낮음)">
+          최근 2년 대비 리스크 수준 ⓘ
+        </div>
+      </div>
+      <div class="card">
+        <div class="label">전망 방향성 변화</div>
+        <div class="value" style="font-size: 16px; margin: 4px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span style="font-weight: 700; color: ${dirColor};">${escapeHtml(dirStatus)}</span>
+          <span class="chip ${dirChipClass}" style="font-size: 11px; margin: 0; padding: 1px 8px; font-weight: 700;">(${dirStreak}개월 연속)</span>
+        </div>
+        <div class="sub" style="margin-top: 8px; font-size: 11px;">모델의 6개월 후 예측 방향 기조가 바뀌었는지 모니터링합니다.</div>
+      </div>
+      <div class="card">
         <div class="label">6개월 후 AI 가격전망</div>
         <div class="value ${rateUp ? "up" : "down"}">${sign}${fmtNum(target)}<span class="chip ${rateUp ? "up" : "down"}">${escapeHtml(fmtSign(rateStr))}</span></div>
         <div class="sub">기준 시나리오 (Base)</div>
-      </div>
-      <div class="card">
-        <div class="label">변동성 지수</div>
-        <div class="value">${fmtNum(f.volatility_score)}<span class="sub" style="margin-left:6px">pt</span></div>
-        <div class="sub">0=안정 · 100=극심</div>
       </div>
     </div>
 
@@ -630,6 +679,26 @@ function drawMini(i, a, curMonthly, curBase, win) {
       },
       scales: { x: { display: false }, y: { display: false } },
     },
+    plugins: [
+      {
+        id: "miniSplitLine",
+        afterDatasetsDraw(chart) {
+          if (!chart.scales.x) return;
+          const px = chart.scales.x.getPixelForValue(H - 1);
+          if (px < chart.chartArea.left || px > chart.chartArea.right) return;
+          const { ctx, chartArea } = chart;
+          ctx.save();
+          ctx.strokeStyle = "rgba(128, 128, 128, 0.7)";
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(px, chartArea.top);
+          ctx.lineTo(px, chartArea.bottom);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    ],
   });
 }
 
