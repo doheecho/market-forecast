@@ -515,11 +515,16 @@ def track_forecast_direction(commodities: dict) -> None:
 
         # 이전 데이터 조회
         p = prev_data.get(k) or {}
-        prev_stance = p.get("direction_stance") or "상승"  # 기본값 상승
-        prev_streak = p.get("direction_streak") or 1       # 기본값 1
+        has_prev = "direction_stance" in p
+        prev_stance = p.get("direction_stance") or "상승"
+        prev_streak = p.get("direction_streak") or 1
         
         # 상태 기조 변화 판정 및 Streak 업데이트
-        if cur_stance == prev_stance:
+        if not has_prev:
+            # 이전 기록이 전혀 없는 첫 실행인 경우 각 자산의 실제 계산된 기조로 1개월 시작
+            new_streak = 1
+            status_text = f"{cur_stance}방향 유지"
+        elif cur_stance == prev_stance:
             new_streak = prev_streak + 1
             status_text = f"{cur_stance}방향 유지"
         else:
