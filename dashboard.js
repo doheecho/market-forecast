@@ -61,10 +61,11 @@ function setProvenance(d) {
   const fc = (d && d.update_date) || "—";
   const S = '<span class="sep">·</span>';
   el.innerHTML =
-    `시세 <b>Yahoo Finance</b> 원자재 선물${S}니켈·아연·텅스텐 <b>Korea PDS</b>(수동 입력)${S}매크로 4종(달러인덱스 DXY·美 10년 국채금리·USD/CNY·USD/KRW)` +
-    `<br>6개월 전망 <b>Google Gemini</b> 생성 + 규칙 기반 보정${S}<b>Base</b>: 12M 로그수익율 평균에 20% 반영${S}<b>Bull/Bear</b>: 원자재별 36M 로그수익율 표준편차 계산 후 z = 1.28 x σ x √t 로 밴드폭 계산${S}` +
-    `<br>과거 유사국면은 통계 근거가 아닌 AI 참고 서술용 정성 Data${S}(다중비교로 인한 우연한 고상관 위험 및 비정상 시계열 상관의 과장 가능성)${S}` +
-    `<br>최종 갱신 — 시세 <b>${px}</b>${S}전망 <b>${fc}</b> (KST)`;
+    `시세 <b>Yahoo Finance</b> 원자재 선물 및 <b>Korea PDS</b>(수동 입력) 연동${S}매크로 4종(달러인덱스 DXY · 美 10년 국채금리 · USD/CNY · USD/KRW)` +
+    `<br>6개월 전망 <b>통계-AI 하이브리드 예측 결합 모델 (Forecast Combination)</b>${S}` +
+    `<b>Base (기준선)</b>: 12M 로그수익률 추세(Drift 20%)와 Gemini AI의 정성 시황 분석을 50:50으로 예측 융합 후 통계 밴드 범위 내로 클리핑${S}` +
+    `<b>Bull/Bear (오차 밴드)</b>: 36M 장기 변동성과 6M 단기 변동성을 50:50 동적 혼합하여 최근 급등락 반영 ➡️ Geometric Random Walk 가정 하에서 80% 신뢰수준(z = 1.28 x σ x √t) 통계량 고정 (AI 간섭 배제)${S}` +
+    `<b>과거 유사국면</b>: 12M 실적 가격궤적 대상 DTW(Dynamic Time Warping) 최소 누적 제곱 거리 기반 형태 유사도 정량 비교 (정성적 AI 참고용)`;
   el.hidden = false;
 }
 
