@@ -72,7 +72,7 @@ _PRICE_HINTS = ("price", "close", "종가", "가격", "usd", "값", "시세", "�
 
 
 def _read_price_csv(path: str) -> list[dict]:
-    """date,price 형태의 CSV → [{date:'YYYY-MM-DD', price:float}]. 인코딩/열이름 자동 판별."""
+    """date,price 형태 of CSV → [{date:'YYYY-MM-DD', price:float}]. 인코딩/열이름 자동 판별."""
     text = None
     for enc in ("utf-8-sig", "cp949", "euc-kr", "latin1"):
         try:
