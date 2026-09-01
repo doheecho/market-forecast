@@ -25,8 +25,10 @@ if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
 # 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
-# 가장 안정적이고 글로벌 가용성이 높은 1.5 계열과 플래그십 2.5 계열을 골고루 배치합니다.
+# 사용자 환경의 API 게이트웨이 권장 사항인 gemini-3.6-flash 및 gemini-3.1-pro-preview를 우선 탐색합니다.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
+    "gemini-3.6-flash",
+    "gemini-3.1-pro-preview",
     "gemini-1.5-flash",
     "gemini-1.5-pro",
     "gemini-2.5-flash",
