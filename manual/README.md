@@ -51,3 +51,5 @@ date,price
 - 은 : US￠/ozt, LBMA 현물
 - 백금 : USD/ozt, LPPM 현물
 - WTI : USD/bbl, NYMEX Futures
+- 철광석 : USD/ton, Fines 중국 칭다오항(CFR) 현물
+- 
