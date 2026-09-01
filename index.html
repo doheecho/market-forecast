@@ -92,8 +92,10 @@
       background: color-mix(in srgb, var(--accent) 16%, var(--panel-2));
     }
     .ana-win button.off, .ana-win button:disabled {
-      color: color-mix(in srgb, var(--muted) 45%, transparent);
-      background: transparent; border-style: dashed; border-color: var(--line);
+      color: color-mix(in srgb, var(--muted) 75%, transparent);
+      background: var(--panel-2);
+      border: 1px solid color-mix(in srgb, var(--muted) 40%, transparent);
+      font-weight: 700;
       cursor: not-allowed;
     }
     .analog-nav { display: inline-flex; gap: 4px; }
@@ -120,6 +122,7 @@
     }
     .chip.up { background: color-mix(in srgb, var(--up) 18%, transparent); color: var(--up); }
     .chip.down { background: color-mix(in srgb, var(--down) 18%, transparent); color: var(--down); }
+    .chip.warning { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
 
     .advisor {
       background: color-mix(in srgb, var(--amber) 5%, var(--panel));
