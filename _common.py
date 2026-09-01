@@ -51,19 +51,20 @@ MANUAL_DIR = "manual"  # manual/nickel.csv, manual/zinc.csv, manual/tungsten.csv
 
 # name, unit, 가격 배수(야후 원값 → 표기 단위)
 META = {
-    "wti": ("WTI 원유 (CME)", "USD/bbl", 1.0),
-    "copper": ("전기동 (LME)", "USD/ton", 2204.62),  # HG=F: USD/lb → USD/ton
-    "aluminum": ("알루미늄 (LME)", "USD/ton", 1.0),
-    "gold": ("금 (LBMA)", "USD/oz.t", 1.0),
-    "silver": ("은 (LBMA)", "USD/oz.t", 1.0),  # SI=F: USD/oz (금·백금과 동일 단위)
-    "platinum": ("백금 (CME)", "USD/oz.t", 1.0),
+    "wti": ("WTI 원유 (NYMEX Futures)", "USD/bbl", 1.0),
+    "copper": ("전기동 (LME 현물)", "USD/ton", 2204.62),  # HG=F: USD/lb → USD/ton
+    "aluminum": ("알루미늄 (LME 현물)", "USD/ton", 1.0),
+    "gold": ("금 (LBMA 현물)", "USD/ozt", 1.0),
+    "silver": ("은 (LBMA 현물)", "US￠/ozt", 100.0),  # SI=F: USD/oz → US￠/ozt (x100)
+    "platinum": ("백금 (LPPM 현물)", "USD/ozt", 1.0),
     "steel": ("열연강판 (CME HRC)", "USD/s.ton", 1.0),  # 냉연 SPCC 아님 — 방향성 참고
-    "ironore": ("철광석 62%Fe (CFR China)", "USD/dmt", 1.0),
+    "ironore": ("철광석 (중국 칭다오항 CFR Fines 현물)", "USD/ton", 1.0),
     # 야후에 자유 시세가 없음 — manual/<key>.csv (date,price) 로 주입하면 대시보드에 자동 표시.
     # CSV 가격은 표기 단위 그대로 (배수 적용 안 함).
-    "nickel": ("니켈 (LME)", "USD/ton", 1.0),
-    "zinc": ("아연 (LME)", "USD/ton", 1.0),
-    "tungsten": ("텅스텐 APT", "USD/mtu", 1.0),
+    "nickel": ("니켈 (LME 현물)", "USD/ton", 1.0),
+    "zinc": ("아연 (LME 현물)", "USD/ton", 1.0),
+    "tungsten": ("텅스텐 (중국 현물 Oxide WO3 99.95%)", "RMB/mt", 1.0),
+    "silicon": ("실리콘 (중국 FOB Ferro 75% 현물)", "USD/ton", 1.0),
 }
 
 _DATE_HINTS = ("date", "일자", "기준", "dt", "ymd", "날짜", "거래일", "월")
