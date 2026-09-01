@@ -129,7 +129,16 @@ def load_manual_history() -> dict[str, list[dict]]:
     for fn in sorted(os.listdir(MANUAL_DIR)):
         if not fn.lower().endswith(".csv"):
             continue
+        # 파일명을 정리하여 소문자화 및 공백/하이픈/언더바 제거
         key = os.path.splitext(fn)[0].strip().lower()
+        key = key.replace(" ", "").replace("_", "").replace("-", "")
+        
+        # 대표적인 사용자 입력 오타/별칭 보정
+        if key == "silicone":
+            key = "silicon"
+        elif key == "aluminium":
+            key = "aluminum"
+            
         if key not in META:
             print(f"[경고] manual/{fn}: META 에 없는 키 '{key}' — 무시")
             continue
