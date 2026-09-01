@@ -39,3 +39,12 @@ date,price
 
 기간은 길수록 좋습니다(과거 유사국면 분석에 최소 30개월 필요). 6년치면 충분합니다.
 갱신은 최신 CSV 로 덮어쓰고 다시 푸시하면 됩니다(월 1회면 충분).
+
+## 각 원자재 단위
+- 니켈 : USD/ton, LME 현물
+- 아연 : USD/ton, LME 현물
+- 텅스텐 : RMB/mt, Oxide WO3 99.95% 중국 현물
+- 알루미늄 : USD/ton, LME 현물
+- 전기동 : USD/ton, LME 현물
+- 실리콘 : USD/ton, Ferro 75% 중국(FOB) 현물
+- 
