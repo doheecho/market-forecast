@@ -29,9 +29,11 @@
 from __future__ import annotations
 
 import csv
+import glob
+import json
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import pandas as pd
 import yfinance as yf
@@ -43,13 +45,15 @@ TICKERS = {
     "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
 }
 
-# 야후에서 받는 원자재. 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입.
+# 시세 소스 우선순위: manual/<key>.csv (1차) → 야후 폴백.
+# 아래는 "야후 티커가 있는" 품목일 뿐, CSV 가 있으면(merge_manual) CSV 가 이긴다.
+# 현재 실제로 야후 폴백을 타는 건 CSV 가 없는 steel 뿐.
 YF_COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum", "steel", "ironore"]
-COMMODITIES = list(YF_COMMODITIES)  # 파이프라인이 참조하는 전체 목록 (확장 가능)
+COMMODITIES = list(YF_COMMODITIES)  # 파이프라인이 참조하는 전체 목록 (CSV-only 품목은 실행 중 편입)
 
-MANUAL_DIR = "manual"  # manual/nickel.csv, manual/zinc.csv, manual/tungsten.csv …
+MANUAL_DIR = "manual"  # 1차 시세 소스: manual/<key>.csv (date,price)
 
-# name, unit, 가격 배수(야후 원값 → 표기 단위)
+# name, unit, 가격 배수(야후 원값 → 표기 단위). CSV 로 들어온 값에는 배수를 적용하지 않는다.
 META = {
     "wti": ("WTI 원유 (NYMEX Futures)", "USD/bbl", 1.0),
     "copper": ("전기동 (LME 현물)", "USD/ton", 2204.62),  # HG=F: USD/lb → USD/ton
@@ -149,6 +153,33 @@ def load_manual_history() -> dict[str, list[dict]]:
         elif rows:  # 헤더만 있는 빈 템플릿은 조용히 무시, 데이터가 부족할 때만 경고
             print(f"[경고] manual/{fn}: 유효 {len(rows)}행(<20) — 건너뜀")
     return out
+
+
+def merge_manual(
+    history: dict[str, list[dict]],
+    spot: dict[str, float] | None = None,
+    raw: dict[str, "pd.Series"] | None = None,
+) -> dict[str, list[dict]]:
+    """manual/<key>.csv 를 1차 시세 소스로 삼아 history 에 덮어쓴다.
+
+    · CSV(유효 20행+)가 있는 키는 그 값으로 history[key] 를 교체하고,
+      raw(야후) 시리즈까지 비워 통계 밴드·유사국면·EWMA 변동성 계산도 모두
+      CSV 기준이 되게 한다(대시보드 표시가와 전망 근거의 단위/출처 불일치 방지).
+    · CSV 가 없거나 부족한 키(steel 등)는 손대지 않아 야후 값이 폴백으로 남는다.
+
+    반환: 이번에 실제로 적용된 {key: rows} (호출측이 COMMODITIES 편입 등에 사용).
+    """
+    manual = load_manual_history()
+    for k, rows in manual.items():
+        history[k] = rows
+        if spot is not None:
+            spot[k] = rows[-1]["price"]
+        if raw is not None:
+            raw[k] = pd.Series(dtype=float)  # 야후 경로 무력화 → 이하 전 계산이 CSV 기준
+    if manual:
+        print(f"[진행] CSV 1차 소스 적용: {', '.join(sorted(manual))} "
+              f"(나머지는 야후 폴백)")
+    return manual
 
 
 def fetch_raw() -> dict[str, pd.Series]:
@@ -262,3 +293,66 @@ def latest_macro(raw: dict[str, pd.Series]) -> dict[str, float]:
 
 def today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
+
+
+# ── 전망 스냅샷 (과거 전망치 변동 추적) ──────────────────────────────────
+# analyze.py 가 매 배치(주 1회)마다 그날 전망을 아래 경로에 '동결' 보관한다.
+# 나중에 "예전에 전망했던 수치가 이후 배치에서 얼마나 바뀌었나"를 비교하기 위함.
+SNAP_DIR = "snapshots/forecast"      # 배치 1회 = 파일 1개 (snapshots/forecast/YYYY-MM-DD.json)
+SNAP_INDEX = "snapshots/index.json"  # 전 스냅샷의 6개월 타겟·현재가·변화율 요약
+
+# 스냅샷에 담을 스칼라 필드 (전망 '수치'만 — advisor/metrics/analogs 서술은 제외해 가볍게)
+_SNAP_FIELDS = (
+    "name", "unit", "current_price", "forecast_6m_target",
+    "forecast_change_rate", "volatility_score",
+)
+_SNAP_ARRAYS = ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear")
+
+
+def save_snapshot(update_date: str, macro: dict, commodities: dict) -> str:
+    """이번 배치의 전망을 snapshots/forecast/<update_date>.json 으로 보관하고
+    snapshots/index.json 을 다시 만든다. 같은 날 재실행 시 그날 파일은 덮어쓴다.
+    월별 base/bull/bear 는 month·price 만 남긴다(근거 문장 제외). 저장 경로를 반환.
+    """
+    os.makedirs(SNAP_DIR, exist_ok=True)
+    snap_c = {}
+    for k, c in commodities.items():
+        row = {f: c.get(f) for f in _SNAP_FIELDS if f in c}
+        for arr in _SNAP_ARRAYS:
+            row[arr] = [
+                {"month": r.get("month"), "price": r.get("price")}
+                for r in (c.get(arr) or [])
+            ]
+        snap_c[k] = row
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    snap = {
+        "captured_at": stamp,
+        "update_date": update_date,
+        "macro": macro,
+        "commodities": snap_c,
+    }
+    path = f"{SNAP_DIR}/{update_date}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(snap, f, ensure_ascii=False, indent=2)
+
+    # 인덱스 재생성: 모든 스냅샷 파일을 날짜순으로 스캔해 요약만 추림
+    entries = []
+    for p in sorted(glob.glob(f"{SNAP_DIR}/*.json")):
+        try:
+            d = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        cs = d.get("commodities", {})
+        entries.append({
+            "date": d.get("update_date") or os.path.splitext(os.path.basename(p))[0],
+            "captured_at": d.get("captured_at"),
+            "file": os.path.relpath(p, "snapshots").replace(os.sep, "/"),
+            "target_6m": {k: v.get("forecast_6m_target") for k, v in cs.items()},
+            "current": {k: v.get("current_price") for k, v in cs.items()},
+            "change_rate": {k: v.get("forecast_change_rate") for k, v in cs.items()},
+        })
+    with open(SNAP_INDEX, "w", encoding="utf-8") as f:
+        json.dump({"updated_at": stamp, "snapshots": entries}, f,
+                  ensure_ascii=False, indent=2)
+    print(f"[성공] 전망 스냅샷 보관: {path} (인덱스 {len(entries)}개)")
+    return path

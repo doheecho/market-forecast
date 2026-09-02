@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: "30 21 * * 1-5"   # 평일 06:30 KST (미국장 마감 후)
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "manual/**"            # CSV(1차 시세 소스)를 고치면 전망은 그대로 두고 시세만 즉시 반영
 
 permissions:
   contents: write

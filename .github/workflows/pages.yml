@@ -7,6 +7,7 @@ on:
       - "index.html"
       - "dashboard.js"
       - "raw_materials_forecast.json"
+      - "snapshots/**"
       - "index_github.html"
       - "manifest.webmanifest"
       - "favicon.svg"
@@ -43,6 +44,7 @@ jobs:
           cp index.html dashboard.js raw_materials_forecast.json _site/
           cp manifest.webmanifest favicon.svg icon-192.png icon-512.png icon-maskable-512.png _site/
           cp index_github.html _site/ 2>/dev/null || true
+          cp -r snapshots _site/ 2>/dev/null || true   # 과거 전망 스냅샷(있으면) 같이 배포
           test -f _site/index.html
 
       - uses: actions/configure-pages@v5

@@ -17,7 +17,7 @@ import pandas as pd
 
 from _common import (
     COMMODITIES, META, build_history, fetch_raw, latest_macro,
-    load_manual_history, today_str,
+    merge_manual, save_snapshot, today_str,
 )
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -52,10 +52,9 @@ history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입 → COMMODITIES 에 편입.
-for _k, _rows in load_manual_history().items():
-    history[_k] = _rows
-    spot[_k] = _rows[-1]["price"]
+# manual/<key>.csv 를 1차 시세 소스로 적용(CSV 있는 키는 야후 시리즈까지 비워
+# 통계 밴드·유사국면·EWMA 도 CSV 기준). CSV 없는 키(steel 등)만 야후 폴백.
+for _k in merge_manual(history, spot, raw):
     if _k not in COMMODITIES:
         COMMODITIES.append(_k)
 
@@ -648,3 +647,6 @@ output = {
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 print("[성공] raw_materials_forecast.json 저장 완료")
+
+# 이번 배치의 전망을 별도 파일로 동결 보관(과거 전망치 변동 추적용)
+save_snapshot(update_date, macro, commodities)

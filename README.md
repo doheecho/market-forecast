@@ -1,21 +1,30 @@
 # 원자재 시황 — 핵심 원자재 AI 가격 전망
 
-WTI·전기동·알루미늄·금·은·백금·열연강판·철광석의 6개월 가격 전망(Base/Bull/Bear) 대시보드.
-(니켈·아연·텅스텐은 자동 무료 소스가 없어 `manual/` CSV 로 주입 — 아래 "니켈·아연·텅스텐" 참고)
-**시세는 평일 매일**, **AI 전망은 주 1회(월요일)** GitHub Actions 가 갱신합니다.
+WTI·전기동·알루미늄·금·은·백금·열연강판·철광석·니켈·아연·텅스텐·실리콘의
+6개월 가격 전망(Base/Bull/Bear) 대시보드.
+
+- **시세 소스**: `manual/*.csv` 가 **1차 소스**입니다. CSV 가 있는 품목은 그 값으로
+  차트·통계·유사국면·전망을 만들고, CSV 가 없거나 20행 미만인 품목(현재는 `steel`)만
+  **야후 파이낸스로 폴백**합니다. (자세히는 아래 "시세 CSV" 참고)
+- **갱신 주기**: **AI 전망은 주 1회(월요일)** 만 돌립니다. CSV 를 고쳐도 전망은 다시
+  돌지 않고 **시세만** 반영됩니다. 매크로·`steel` 시세는 평일 매일 갱신됩니다.
+- **전망 스냅샷**: 배치가 돌 때마다 그날 전망을 `snapshots/forecast/<날짜>.json` 으로
+  동결 보관합니다 — 과거에 전망했던 수치가 이후에 얼마나 바뀌었는지 추적용.
 
 ## 구성
 
 | 파일 | 역할 |
 |---|---|
-| `_common.py` | 야후 수집 + `manual/` CSV 로더 공용 로직 (analyze/prices 공유) |
-| `manual/*.csv` | 야후에 없는 니켈·아연·텅스텐 시세를 수동으로 넣는 곳 (`manual/README.md` 참고) |
-| `prices.py` | **시세만** 갱신 (Gemini 미사용) — `history_3y`·`macro`·`prices_date` 교체 (`manual/` 병합) |
-| `analyze.py` | 시세 + Gemini → 6개월 전망(`forecast_data`) 생성 |
+| `_common.py` | CSV 로더 + 야후 수집 + `merge_manual`(CSV 우선 병합) + `save_snapshot` 공용 로직 |
+| `manual/*.csv` | **1차 시세 소스** (`date,price`). 품목별 CSV — `manual/README.md` 참고 |
+| `prices.py` | **시세만** 갱신 (Gemini 미사용) — `history_3y`·`macro`·`prices_date` 교체 |
+| `analyze.py` | 시세 + Gemini → 6개월 전망(`forecast_data`) 생성 + 전망 스냅샷 저장 |
 | `raw_materials_forecast.json` | 대시보드가 읽는 단일 데이터 파일 (Actions 자동 갱신) |
+| `snapshots/forecast/*.json` | 배치별 전망 동결본 (월별 base/bull/bear·타겟·변화율만) |
+| `snapshots/index.json` | 전 스냅샷의 6개월 타겟·현재가·변화율 요약 (변동 추적·차트용) |
 | `index.html` + `dashboard.js` | 정적 대시보드 (다크 테마) |
-| `.github/workflows/prices.yml` | 평일 06:30 KST 시세 갱신 |
-| `.github/workflows/run.yml` | 월요일 07:00 KST AI 전망 생성 |
+| `.github/workflows/prices.yml` | 평일 06:30 KST + `manual/**` push 시 시세 갱신 |
+| `.github/workflows/run.yml` | **월요일 07:00 KST 만** AI 전망 생성 (+ 수동 실행) |
 | `.github/workflows/pages.yml` | GitHub Pages 배포 (push / 위 두 워크플로 완료 시) |
 | `index_github.html` | 구 링크 호환용 → `index.html` 리다이렉트 |
 
@@ -67,23 +76,24 @@ wrangler secret put GH_DISPATCH_TOKEN   REM fine-grained PAT · 이 리포 · Ac
 찾아 실제 가격을 넣고, Gemini 는 그 위에 사건명·요약만 붙입니다. **비교창은 1년/6개월
 두 가지**로 각각 산출되며 대시보드에서 버튼으로 전환합니다.
 
-## 니켈·아연·텅스텐 (manual/ CSV)
+## 시세 CSV (manual/ — 1차 소스)
 
-이 3종은 **무료로 자동 수집할 소스가 없습니다.** (야후=선물 없음, stooq=봇차단,
-investing.com=Cloudflare 차단 + 과거값 오류, KOMIS=공개 API 없음, LME=유료.)
-그래서 `manual/` 폴더에 CSV 를 넣으면 파이프라인이 알아서 병합합니다.
+`manual/<품목>.csv` (`date,price`) 가 있으면 그 품목은 **CSV 값으로만** 차트·통계·
+유사국면·전망을 만듭니다(야후 값·직전 파일값보다 항상 우선). CSV 가 없거나 유효
+20행 미만인 품목만 야후 파이낸스로 폴백합니다 — 현재 폴백은 `steel`(HRC) 뿐.
 
-1. 엑셀에서 **날짜 + 종가** 두 열로 정리 → `CSV 로 저장`.
-   (KOMIS <https://www.komis.or.kr> → 광종/국가정보 → 광종정보 에서 엑셀 받아 정리해도 됨)
-2. `manual/nickel.csv`, `manual/zinc.csv`, `manual/tungsten.csv` 를 덮어쓰기.
-   가격은 **표시 단위 그대로**(니켈·아연 USD/ton, 텅스텐 USD/mtu). 자세한 형식은
-   `manual/README.md` 참고.
-3. `git add manual && git commit && git push`
-   → `prices.yml`(매일)·`run.yml`(주간)이 매 실행마다 읽어 병합하고,
-   다음 배포부터 대시보드에 **니켈 / 아연 / 텅스텐 탭**이 생깁니다.
+- 파일명이 곧 키입니다: `copper.csv`, `Gold.csv`, `Iron ore.csv` … (대소문자·공백 무시,
+  `aluminium→aluminum`, `Silicone→silicon` 오타 보정). `_common.py` 의 `META` 에 없는
+  이름은 무시됩니다.
+- 가격은 **표시 단위 그대로** 넣습니다(환산 안 함). 단위 표는 `manual/README.md` 참고.
+- 갱신: 최신 CSV 로 덮어쓰고 `git add manual && git commit && git push`.
+  → `manual/**` push 가 `prices.yml`(시세만) 을 돌려 대시보드에 바로 반영됩니다.
+  **AI 전망(`run.yml`)은 이때 돌지 않습니다** — 전망은 월요일 스케줄 또는 수동 실행에서만.
+- 새 품목을 처음 추가할 때 그 자리에서 전망까지 만들려면 Actions → **Market
+  Forecasting → Run workflow** 를 한 번 눌러 주세요.
 
-`prices.py` 는 야후 갱신 때 이 키들을 `manual/` 값으로 유지하고, `analyze.py` 는
-그 시세로 6개월 전망·유사국면까지 만듭니다. 갱신은 CSV 를 새로 덮어쓰고 푸시하면 됩니다.
+니켈·아연·텅스텐은 애초에 무료 자동 소스가 없어(야후=선물 없음, stooq=봇차단,
+investing.com=차단, KOMIS=API 없음, LME=유료) CSV 가 유일한 경로입니다.
 
 ## 로컬 실행 / 확인
 

@@ -9,7 +9,7 @@ import json
 import sys
 
 from _common import (
-    build_history, fetch_raw, latest_macro, load_manual_history, today_str,
+    build_history, fetch_raw, latest_macro, merge_manual, today_str,
 )
 
 raw = fetch_raw()
@@ -23,15 +23,14 @@ except Exception:  # noqa: BLE001
     doc = {}
 
 # 이번 수집에서 특정 품목이 비어 있으면(야후 간헐 실패 등) 직전 파일값을 보존한다.
-# 야후에 아예 없는 품목(니켈·아연·텅스텐)도 같은 경로로 이어짐.
-manual = load_manual_history()
 prev_hist = doc.get("history_3y") or {}
 for k, rows in prev_hist.items():
     if not history.get(k) and rows:
         history[k] = rows
         print(f"[경고] {k}: 이번 수집 0행 → 직전 파일값 {len(rows)}행 보존")
-for k, rows in manual.items():
-    history[k] = rows
+
+# CSV(manual/<key>.csv)가 있는 품목은 항상 CSV 값이 최종 — 야후·직전값보다 우선.
+merge_manual(history)
 
 doc["history_3y"] = history
 doc["macro"] = latest_macro(raw)

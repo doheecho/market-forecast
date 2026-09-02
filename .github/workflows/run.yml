@@ -2,12 +2,10 @@ name: Market Forecasting
 
 on:
   schedule:
-    - cron: "0 22 * * 1"   # 매주 월요일 07:00 KST (6개월 전망은 주 1회면 충분)
-  workflow_dispatch:        # 필요하면 대시보드의 "↻ AI 분석 갱신" 또는 수동 실행
-  push:
-    branches: [main]
-    paths:
-      - "manual/**"          # 니켈·아연·텅스텐 CSV 를 (웹에서든) 수정하면 바로 재생성
+    - cron: "0 22 * * 1"   # 매주 월요일 07:00 KST — 6개월 전망은 주 1회만 갱신
+  workflow_dispatch:        # 그 외에는 대시보드의 "↻ AI 분석 갱신" 또는 수동 실행으로만
+  # CSV(manual/**) 를 고쳐도 여기서 Gemini 전망을 다시 돌리지는 않는다.
+  # (시세 반영은 prices.yml 이 manual/** push 로 받아 처리 — 전망은 주 1회 유지)
 
 permissions:
   contents: write
@@ -39,7 +37,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add raw_materials_forecast.json
+          git add raw_materials_forecast.json snapshots
           if git diff --cached --quiet; then
             echo "변경 없음"
           else

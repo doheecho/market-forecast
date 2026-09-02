@@ -1,0 +1,52 @@
+{
+  "updated_at": "2026-09-02T12:09:50Z",
+  "snapshots": [
+    {
+      "date": "2026-09-01",
+      "captured_at": "2026-09-02T12:09:50Z",
+      "file": "forecast/2026-09-01.json",
+      "target_6m": {
+        "wti": 83.6,
+        "copper": 14886.2,
+        "aluminum": 3170.9,
+        "gold": 4732.6,
+        "silver": 7434.55,
+        "platinum": 1915.13,
+        "steel": 1247.01,
+        "ironore": 98.31,
+        "silicon": 1232.22,
+        "nickel": 16827.93,
+        "tungsten": 719668.12,
+        "zinc": 3961.22
+      },
+      "current": {
+        "wti": 85.76,
+        "copper": 14535.0,
+        "aluminum": 3222.0,
+        "gold": 4562.75,
+        "silver": 7026.0,
+        "platinum": 1883.95,
+        "steel": 1199.0,
+        "ironore": 99.41,
+        "silicon": 1260.0,
+        "nickel": 16850.0,
+        "tungsten": 685000.0,
+        "zinc": 3865.5
+      },
+      "change_rate": {
+        "wti": "-2.5%",
+        "copper": "+2.4%",
+        "aluminum": "-1.6%",
+        "gold": "+3.7%",
+        "silver": "+5.8%",
+        "platinum": "+1.7%",
+        "steel": "+4.0%",
+        "ironore": "-1.1%",
+        "silicon": "-2.2%",
+        "nickel": "-0.1%",
+        "tungsten": "+5.1%",
+        "zinc": "+2.5%"
+      }
+    }
+  ]
+}
