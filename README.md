@@ -25,6 +25,7 @@ WTI·전기동·알루미늄·금·은·백금·열연강판·철광석·니켈�
 | `snapshots/forecast/*.json` | 배치별 전망 동결본 (KST 시각 + 월별 base/bull/bear·타겟·변화율) |
 | `snapshots/index.json` | 전 스냅샷의 6개월 타겟·현재가·변화율 요약 (변동 추적·차트용) |
 | `snapshots/accuracy.json` | 지나간 예측월 vs 실제가 원장 + 집계(MAE·편향·밴드적중·나이브대비) |
+| `backtest.py` + `backtest/` | (분석용·live 무관) 통계 전망 워크포워드 백테스트 — pinball·커버리지·PIT·DM검정. 방법론 튜닝 근거 |
 | `index.html` + `dashboard.js` | 정적 대시보드 (다크 테마) |
 | `.github/workflows/prices.yml` | 평일 06:30 KST + `manual/**` push 시 시세 갱신 |
 | `.github/workflows/run.yml` | **월요일 07:00 KST 만** AI 전망 생성 (+ 수동 실행) |
