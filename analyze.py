@@ -313,9 +313,9 @@ SCHEMA_ONE = """{
   "current_price": 0.0, "forecast_6m_target": 0.0, "forecast_change_rate": "+0.0%", "volatility_score": 0,
   "planning_advisor": "구매/헤지 담당자를 위한 한 문장 전략 코멘트",
   "advisor": "원자재 구매 담당자를 위한 3~4문장. 최근 시황 / 관련 글로벌 정세 / 알아야 할 주요 뉴스 / 대응 조언 순서로 서술.",
-  "monthly_forecast_base": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 기본 시나리오 가격 근거 한 문장"} ],
-  "monthly_forecast_bull": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 낙관 시나리오 가격 근거(상방 요인 중심) 한 문장"} ],
-  "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
+  "monthly_forecast_base": [ {"month": "2026-10", "price": 0.0, "rationale": "해당 월 기본 시나리오 근거 한 문장"}, "…(2026-11 … 2027-03 까지 총 6개)" ],
+  "monthly_forecast_bull": [ {"month": "2026-10", "price": 0.0, "rationale": "해당 월 상방 요인 중심 근거 한 문장"}, "…(총 6개)" ],
+  "monthly_forecast_bear": [ {"month": "2026-10", "price": 0.0, "rationale": "해당 월 하방 요인 중심 근거 한 문장"}, "…(총 6개)" ],
   "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
   "analogs": [ {"title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
@@ -343,8 +343,10 @@ def build_prompt(keys: list[str]) -> str:
 6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
 규칙:
-- monthly_forecast_* 는 {update_date} 기준 이후 6개 월 (예: 2026-09 ~ 2027-02).
-- monthly_forecast_base/bull/bear 세 배열 모두 각 월에 price 와 rationale(한 문장)을 넣으세요.
+- monthly_forecast_base / monthly_forecast_bull / monthly_forecast_bear 는 각각
+  **정확히 6개 원소**의 배열이어야 합니다({update_date} 다음 달부터 연속 6개월,
+  예: 2026-10, 2026-11, 2026-12, 2027-01, 2027-02, 2027-03). 5개 이하는 무효.
+- 세 배열 모두 각 월에 price(숫자)와 rationale(한 문장)을 넣으세요.
   bull 은 상방 요인, bear 는 하방 요인 중심으로 근거를 서술.
 - current_price 는 위 current_spot 값(최근 실적가)과 동일하게, base 첫 달은 거기서 ±4% 이내 출발.
 - base 경로는 '직선'이 아니라 실제 전망처럼 **월별로 방향 전환·되돌림·기울기 변화**가
@@ -690,8 +692,10 @@ def validate(commodities: dict) -> None:
         gaps = need - set(commodities[k])
         if gaps:
             raise ValueError(f"{k} 필드 누락: {sorted(gaps)}")
-        if not commodities[k]["monthly_forecast_base"]:
-            raise ValueError(f"{k} monthly_forecast_base 비어 있음")
+        for arr in ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear"):
+            if len(commodities[k].get(arr) or []) < 5:
+                raise ValueError(
+                    f"{k} {arr} 가 {len(commodities[k].get(arr) or [])}개월 (6개월 필요)")
 
 
 def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
@@ -717,14 +721,35 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
 _BATCHES = [COMMODITIES[i:i + BATCH_SIZE] for i in range(0, len(COMMODITIES), BATCH_SIZE)]
 print(f"[진행] Gemini 전망 생성… ({len(COMMODITIES)}종 → {len(_BATCHES)}개 배치)")
 try:
+    def _batch_defects(got: dict, chunk: list) -> list[str]:
+        """배치 응답에서 누락·월수 부족(<5)인 품목 목록. flash-lite 가 '6개월'
+        지시를 무시하고 1~2개만 내는 경우가 잦아 배치 단위로 걸러 재시도한다."""
+        bad = []
+        for k in chunk:
+            c = got.get(k)
+            if not isinstance(c, dict):
+                bad.append(k)
+                continue
+            if any(len(c.get(a) or []) < 5 for a in
+                   ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear")):
+                bad.append(k)
+        return bad
+
     commodities: dict = {}
     for bn, chunk in enumerate(_BATCHES, 1):
-        print(f"[진행] 배치 {bn}/{len(_BATCHES)}: {', '.join(chunk)}")
-        parsed = call_gemini(build_prompt(chunk))
-        got = parsed.get("commodities") or parsed
-        missing = [k for k in chunk if k not in got]
-        if missing:
-            raise ValueError(f"배치 {bn} 응답 누락: {missing}")
+        got = {}
+        for attempt in range(1, 4):
+            print(f"[진행] 배치 {bn}/{len(_BATCHES)}: {', '.join(chunk)}"
+                  + (f" (재시도 {attempt - 1})" if attempt > 1 else ""))
+            parsed = call_gemini(build_prompt(chunk))
+            got = parsed.get("commodities") or parsed
+            bad = _batch_defects(got, chunk)
+            if not bad:
+                break
+            print(f"[경고] 배치 {bn}: {bad} 응답 누락/월수부족 → 재시도")
+        bad = _batch_defects(got, chunk)
+        if bad:
+            raise ValueError(f"배치 {bn} 재시도 후에도 불량: {bad}")
         for k in chunk:
             commodities[k] = got[k]
     validate(commodities)
