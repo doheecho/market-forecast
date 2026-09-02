@@ -25,19 +25,20 @@ if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
 # 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
-# 사용자 환경의 API 게이트웨이 권장 사항인 gemini-3.6-flash 및 gemini-3.1-pro-preview를 우선 탐색합니다.
+# flash-lite 를 1순위로 — 2026-09-02 현재 3.6-flash/flash-latest 는 배치 호출에도
+# 504(DEADLINE)/503 가 잦고, flash-lite 만 안정적으로 빠르게 응답함.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
+    "gemini-flash-lite-latest",
     "gemini-3.6-flash",
     "gemini-flash-latest",
-    "gemini-flash-lite-latest",
-    # gemini-1.5·2.5 계열은 2026-09-02 부터 404, gemini-3.1-pro 는 무료티어 쿼터 0(429).
+    # gemini-1.5·2.5 계열은 404, gemini-3.1-pro 는 무료티어 쿼터 0(429).
 ]
 
 # 12종을 한 번에 요청하면 응답이 커서 MAX_TOKENS 로 잘리거나 504(DEADLINE)가 난다.
 # → BATCH_SIZE 종씩 나눠 여러 번 호출하고 결과를 합친다.
 BATCH_SIZE = 3
 _MAX_OUT_TOKENS = 20000   # 배치당(3종) 출력은 ~7천 토큰 — 넉넉
-_REQ_TIMEOUT_S = 150      # 배치 1회 호출 상한(초)
+_REQ_TIMEOUT_S = 100      # 배치 1회 호출 상한(초). 넘으면 그 모델은 포기하고 다음으로
 
 try:
     from google import genai
@@ -429,12 +430,14 @@ def _extract_json(resp) -> dict:
 
 
 def call_gemini(text: str) -> dict:
+    """MODELS 를 순서대로 1회씩만 시도(504/503/파싱실패는 재시도해도 잘 안 풀리고
+    시간만 먹으므로 곧장 다음 모델로). 파싱 실패한 응답은 한 번 더만 재시도."""
     last = None
     for model in MODELS:
-        for attempt in range(1, 3):
+        for attempt in (1, 2):
             t0 = time.monotonic()
             try:
-                print(f"[진행] {model} 호출 (시도 {attempt})…")
+                print(f"[진행] {model} 호출…")
                 if _NEW_SDK:
                     cfg = {
                         "response_mime_type": "application/json",
@@ -467,11 +470,13 @@ def call_gemini(text: str) -> dict:
                 return out
             except Exception as e:  # noqa: BLE001
                 last = e
-                msg = str(e)
-                print(f"[경고] {model} {time.monotonic() - t0:.0f}s 실패: {e}")
-                if "404" in msg or "NOT_FOUND" in msg or "limit: 0" in msg:
-                    break  # 없는 모델·쿼터0 은 재시도 무의미 → 다음 모델
-                time.sleep(2 ** attempt)
+                dt = time.monotonic() - t0
+                print(f"[경고] {model} {dt:.0f}s 실패: {e}")
+                # 파싱 실패(응답은 왔음)만 같은 모델로 1회 재시도, 그 외는 곧장 다음 모델
+                if attempt == 1 and "파싱 실패" in str(e):
+                    time.sleep(2)
+                    continue
+                break
     raise RuntimeError(f"Gemini 전체 실패: {last}")
 
 
