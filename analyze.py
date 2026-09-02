@@ -397,7 +397,8 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 
 # 12종 × (base/bull/bear 6개월 + metrics + analogs + advisor) 는 출력이 매우 길다.
 # max_output_tokens 를 넉넉히 주지 않으면 응답이 중간에 잘려 JSON 파싱이 깨진다.
-_MAX_OUT_TOKENS = 65536
+_MAX_OUT_TOKENS = 24576      # 12종 전망 실제 출력은 ~1만 토큰 — 넉넉하되 폭주 억제
+_REQ_TIMEOUT_S = 180        # 한 번의 Gemini 호출 상한(초). 연결이 멈춰도 여기서 끊고 다음으로
 
 
 def _extract_json(resp) -> dict:
@@ -431,9 +432,10 @@ def _extract_json(resp) -> dict:
 def call_gemini(text: str) -> dict:
     last = None
     for model in MODELS:
-        for attempt in range(1, 4):
+        for attempt in range(1, 3):
+            t0 = time.monotonic()
             try:
-                print(f"[진행] {model} 호출 (시도 {attempt})…")
+                print(f"[진행] {model} 호출 (시도 {attempt}, 타임아웃 {_REQ_TIMEOUT_S}s)…")
                 if _NEW_SDK:
                     cfg = {
                         "response_mime_type": "application/json",
@@ -441,6 +443,7 @@ def call_gemini(text: str) -> dict:
                         "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
                         "top_p": 0.9,
                         "max_output_tokens": _MAX_OUT_TOKENS,
+                        "http_options": {"timeout": _REQ_TIMEOUT_S * 1000},  # ms
                     }
                     if "thinking" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
@@ -448,7 +451,9 @@ def call_gemini(text: str) -> dict:
                         model=model, contents=text,
                         config=types.GenerateContentConfig(**cfg),
                     )
-                    return _extract_json(r)
+                    out = _extract_json(r)
+                    print(f"[진행] {model} 응답 {time.monotonic() - t0:.0f}s")
+                    return out
                 m = _legacy.GenerativeModel(model)
                 r = m.generate_content(
                     text,
@@ -458,16 +463,20 @@ def call_gemini(text: str) -> dict:
                         "top_p": 0.9,
                         "max_output_tokens": _MAX_OUT_TOKENS,
                     },
+                    request_options={"timeout": _REQ_TIMEOUT_S},
                 )
-                return _extract_json(r)
+                out = _extract_json(r)
+                print(f"[진행] {model} 응답 {time.monotonic() - t0:.0f}s")
+                return out
             except Exception as e:  # noqa: BLE001
                 last = e
                 msg = str(e)
+                print(f"[경고] {model} {time.monotonic() - t0:.0f}s 만에 실패")
                 # 없는 모델(404)·쿼터 0(free tier limit:0) 은 재시도해도 안 됨 → 바로 다음 모델
                 if "404" in msg or "NOT_FOUND" in msg or "limit: 0" in msg:
                     print(f"[경고] {model}: 사용 불가(모델 없음/쿼터 0) — 다음 모델로")
                     break
-                wait = 2 ** attempt  # 503(수요 급증)·잘림·일시 오류는 2·4·8s 백오프로 재시도
+                wait = 2 ** attempt  # 503(수요 급증)·잘림·일시 오류는 2·4s 백오프로 1회 재시도
                 print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
                 time.sleep(wait)
     raise RuntimeError(f"Gemini 전체 실패: {last}")

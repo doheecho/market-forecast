@@ -17,6 +17,7 @@ concurrency:
 jobs:
   forecast:
     runs-on: ubuntu-latest
+    timeout-minutes: 20      # Gemini 호출이 멈춰도 20분이면 잡을 끊는다 (기본 6시간 방지)
     steps:
       - uses: actions/checkout@v4
 
