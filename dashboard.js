@@ -69,7 +69,7 @@ function setProvenance(d) {
   el.hidden = false;
 }
 
-/* 화면 표시용: ASCII 하이픈(-) → 진짜 마이너스(-) 로 치환 */
+/* 화면 표시용: ASCII 하이픈(-) → 진짜 마이너스(−) 로 치환 */
 function fmtSign(s) {
   return String(s == null ? "" : s).replace(/-/g, "−");
 }
@@ -196,7 +196,7 @@ function render() {
   const sign = currencySign(f.unit);
   const venue = VENUE[state.key] || (String(f.name || "").match(/\(([^)]+)\)/) || [])[1] || "";
 
-  // 현재가 · 전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
+  // 현재가·전망을 '실적 마지막 정상값(spot)' 기준으로 재계산 → 차트와 KPI 일관.
   const hist = historyRows(state.key); // 이미 despike 됨
   const base = f.monthly_forecast_base || [];
   const spot =
@@ -255,7 +255,7 @@ function render() {
       <div class="card">
         <div class="label">현재가</div>
         <div class="value">${sign}${fmtNum(spot ?? f.current_price)}</div>
-        <div class="sub">${escapeHtml(f.unit || "")}${venue ? " · " + escapeHtml(venue) : ""}</div>
+        <div class="sub">${escapeHtml(venue || f.unit || "")}</div>
       </div>
       <div class="card">
         <div class="label" style="display: flex; justify-content: space-between; align-items: center;">
@@ -271,14 +271,6 @@ function render() {
         <div class="sub" style="margin-top: 6px; font-size: 11px; cursor: help; display: flex; align-items: center; gap: 4px;" title="EWMA(지수가중이동평균) 기반 연율화 변동성의 최근 2년 내 백분위입니다. 값이 높을수록 최근 가격 변동 폭이 과거 대비 큰 편임을 의미하며, 구매 타이밍 판단 시 리스크 수준의 참고 지표로 활용됩니다. (70% 초과: 변동성 높음, 30~70%: 보통, 30% 이하: 낮음)">
           최근 2년 대비 리스크 수준 ⓘ
         </div>
-      </div>
-      <div class="card">
-        <div class="label">전망 방향성 변화</div>
-        <div class="value" style="font-size: 16px; margin: 4px 0; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-          <span style="font-weight: 700; color: ${dirColor};">${escapeHtml(dirStatus)}</span>
-          <span class="chip ${dirChipClass}" style="font-size: 11px; margin: 0; padding: 1px 8px; font-weight: 700;">(${dirStreak}개월 연속)</span>
-        </div>
-        <div class="sub" style="margin-top: 8px; font-size: 11px;">모델의 6개월 후 예측 방향 기조가 바뀌었는지 모니터링합니다.</div>
       </div>
       <div class="card">
         <div class="label">6개월 후 AI 가격전망</div>
