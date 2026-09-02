@@ -25,14 +25,14 @@ if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
 # 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
-# 사용자 환경의 API 게이트웨이 권장 사항인 gemini-3.6-flash 및 gemini-3.1-pro-preview를 우선 탐색합니다.
+# gemini-1.5/2.5 계열은 전부 404(신규 사용자 불가)라 목록에서 뺐다. flash 계열 alias 를
+# 먼저 두어 다음 세대 교체 때 자동으로 따라가게 하고, pro-preview 는 마지막 폴백.
+# (pro 는 무료 티어 쿼터가 0 이라 유료 프로젝트에서만 성공 — 그래서 맨 뒤)
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
+    "gemini-flash-latest",
     "gemini-3.6-flash",
+    "gemini-flash-lite-latest",
     "gemini-3.1-pro-preview",
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-2.5-flash",
-    "gemini-2.5-pro",
 ]
 
 try:
@@ -402,7 +402,7 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 def call_gemini(text: str) -> str:
     last = None
     for model in MODELS:
-        for attempt in range(1, 3):
+        for attempt in range(1, 4):
             try:
                 print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
@@ -430,7 +430,12 @@ def call_gemini(text: str) -> str:
                 ).text
             except Exception as e:  # noqa: BLE001
                 last = e
-                wait = 2 ** attempt
+                msg = str(e)
+                # 없는 모델(404)·쿼터 0(free tier limit:0) 은 재시도해도 안 됨 → 바로 다음 모델
+                if "404" in msg or "NOT_FOUND" in msg or "limit: 0" in msg:
+                    print(f"[경고] {model}: 사용 불가(모델 없음/쿼터 0) — 다음 모델로")
+                    break
+                wait = 2 ** attempt  # 503(수요 급증)·일시 오류는 2·4·8s 백오프로 재시도
                 print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
                 time.sleep(wait)
     raise RuntimeError(f"Gemini 전체 실패: {last}")

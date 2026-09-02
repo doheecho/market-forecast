@@ -52,8 +52,9 @@ git push
 
 1. **Settings → Secrets and variables → Actions**
    - Secret `GEMINI_API_KEY` (필수)
-   - Variable `GEMINI_MODEL` (선택 · 쉼표 구분 폴백 목록. 기본
-     `gemini-flash-latest,gemini-2.5-flash,gemini-flash-lite-latest`)
+   - Variable `GEMINI_MODEL` (선택 · 쉼표 구분 폴백 목록. 미설정 시 기본
+     `gemini-flash-latest,gemini-3.6-flash,gemini-flash-lite-latest,gemini-3.1-pro-preview`.
+     1.5·2.5 계열은 신규 사용자 404 라 넣지 말 것)
 2. **Settings → Pages → Build and deployment → Source = `GitHub Actions`**
 3. 접속: `https://doheecho.github.io/market-forecast/`
 
