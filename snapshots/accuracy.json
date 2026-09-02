@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-03 00:10",
+  "updated_at": "2026-09-03 00:27",
   "note": "error_pct = (실제/전망_base - 1)*100. bias_pct>0 = 실제가 전망보다 높았음(전망이 과소). naive = '현재가 그대로 유지' 가정 오차. model MAE < naive MAE 여야 전망이 값어치 있음.",
   "overall": {
     "n": 0
