@@ -28,10 +28,16 @@ if not API_KEY:
 # 사용자 환경의 API 게이트웨이 권장 사항인 gemini-3.6-flash 및 gemini-3.1-pro-preview를 우선 탐색합니다.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
     "gemini-3.6-flash",
-    "gemini-3.1-pro-preview",
-    # gemini-1.5-flash/1.5-pro/2.5-flash/2.5-pro 는 2026-09-02 부터 404(신규 사용자 불가)
-    # 라 폴백 목록에서 제외. 이 두 줄 외에는 9/1(정상 동작) 버전 그대로.
+    "gemini-flash-latest",
+    "gemini-flash-lite-latest",
+    # gemini-1.5·2.5 계열은 2026-09-02 부터 404, gemini-3.1-pro 는 무료티어 쿼터 0(429).
 ]
+
+# 12종을 한 번에 요청하면 응답이 커서 MAX_TOKENS 로 잘리거나 504(DEADLINE)가 난다.
+# → BATCH_SIZE 종씩 나눠 여러 번 호출하고 결과를 합친다.
+BATCH_SIZE = 3
+_MAX_OUT_TOKENS = 20000   # 배치당(3종) 출력은 ~7천 토큰 — 넉넉
+_REQ_TIMEOUT_S = 150      # 배치 1회 호출 상한(초)
 
 try:
     from google import genai
@@ -254,12 +260,6 @@ analogs_real_6m = {k: top_analogs(k, 6) for k in COMMODITIES}     # 6개월 비�
 
 update_date = today_str()
 macro = latest_macro(raw)
-market_input = {
-    "update_date": update_date,
-    "macro": macro,
-    "current_spot": {k: spot.get(k) for k in COMMODITIES},  # 최근 실적가 — current_price 앵커
-    "history_summary": history_brief,
-}
 
 # 원자재별 주요 영향 요인 — metrics 선정 가이드로 프롬프트에 주입
 FACTORS = {
@@ -317,22 +317,28 @@ SCHEMA_ONE = """{
   "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
   "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
-  "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
-    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
-    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
-  "analogs_6m": [ {"period": "(6개월 리스트의 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
-    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
-    "title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
+  "analogs": [ {"title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
+  "analogs_6m": [ {"title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
 }"""
 
-_KEYS_STR = ", ".join(COMMODITIES)
-_SCHEMA_KEYS = ", ".join(
-    f'"{k}": {SCHEMA_ONE}' if k == COMMODITIES[0] else f'"{k}": {{...}}'
-    for k in COMMODITIES
-)
-
-prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
-아래 시장 입력 데이터를 바탕으로 원자재 {len(COMMODITIES)}종({_KEYS_STR})의
+def build_prompt(keys: list[str]) -> str:
+    """commodity 부분집합(keys)에 대한 프롬프트 생성. 배치 호출용."""
+    keys_str = ", ".join(keys)
+    schema_keys = ", ".join(
+        f'"{k}": {SCHEMA_ONE}' if i == 0 else f'"{k}": {{...}}'
+        for i, k in enumerate(keys)
+    )
+    market_input = {
+        "update_date": update_date,
+        "macro": macro,
+        "current_spot": {k: spot.get(k) for k in keys},
+        "history_summary": {k: history_brief.get(k) for k in keys},
+    }
+    ar = {k: analogs_real.get(k, []) for k in keys}
+    ar6 = {k: analogs_real_6m.get(k, []) for k in keys}
+    factors_txt = chr(10).join(f"- {k}: {FACTORS[k]}" for k in keys if k in FACTORS)
+    return f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트입니다.
+아래 시장 입력 데이터를 바탕으로 원자재 {len(keys)}종({keys_str})의
 6개월 가격 전망 데이터셋을 순수 JSON 으로만 작성하세요. 마크다운/설명 금지.
 
 규칙:
@@ -353,10 +359,10 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치 and 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
-  각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
-  period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
-  title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
+- analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '(6개월)' 리스트의 각 항목당
+  title 과 summary 만 채운 객체 1개씩(리스트 순서·개수 그대로, 비어 있으면 빈 배열).
+  period·similarity·actual·miniHist·miniForecast 같은 수치는 시스템이 실제값으로
+  채우므로 **출력하지 마세요**. title=그 시기 실제 사건명, summary=그 국면 배경.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
   최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
   전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
@@ -382,26 +388,51 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
   급등락했을 경우, 다음달의 Bull/Bear밴드가 즉각적으로 넓어져 실제 시장의 불확실성을 더 잘 반영하게 해야
 
 [실제 과거 유사국면 (1년) — 실거래 가격궤적 유사도 분석]
-{json.dumps(analogs_real, ensure_ascii=False)}
+{json.dumps(ar, ensure_ascii=False)}
 
 [실제 과거 유사국면 (6개월) — 실거래 가격궤적 유사도 분석]
-{json.dumps(analogs_real_6m, ensure_ascii=False)}
+{json.dumps(ar6, ensure_ascii=False)}
 
 [원자재별 주요 영향 요인]
-{chr(10).join(f"- {k}: {FACTORS[k]}" for k in COMMODITIES if k in FACTORS)}
+{factors_txt}
 
 [시장 입력 데이터]
 {json.dumps(market_input, ensure_ascii=False)}
 
 응답 스키마 (commodities 의 각 값은 아래 형태, name/unit 은 원자재에 맞게):
-{{ "update_date": "{update_date}", "commodities": {{ {_SCHEMA_KEYS} }} }}
+{{ "update_date": "{update_date}", "commodities": {{ {schema_keys} }} }}
 """
 
 
-def call_gemini(text: str) -> str:
+def _extract_json(resp) -> dict:
+    """SDK 응답 → dict. 코드펜스·앞뒤 잡텍스트·잘림 방어, 실패 시 원인을 메시지에."""
+    txt = (getattr(resp, "text", None) or "").strip()
+    fr = None
+    try:
+        fr = str(resp.candidates[0].finish_reason)
+    except Exception:  # noqa: BLE001
+        pass
+    if not txt:
+        raise ValueError(f"빈 응답 (finish_reason={fr})")
+    if txt.startswith("```"):
+        txt = txt[3:]
+        if txt[:4].lower() == "json":
+            txt = txt[4:]
+        txt = txt.split("```", 1)[0]
+    i, j = txt.find("{"), txt.rfind("}")
+    if i >= 0 and j > i:
+        txt = txt[i:j + 1]
+    try:
+        return json.loads(txt)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"JSON 파싱 실패: {e} · finish_reason={fr} · 길이 {len(txt)}") from e
+
+
+def call_gemini(text: str) -> dict:
     last = None
     for model in MODELS:
         for attempt in range(1, 3):
+            t0 = time.monotonic()
             try:
                 print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
@@ -410,6 +441,8 @@ def call_gemini(text: str) -> str:
                         "automatic_function_calling": {"disable": True},  # AFC 경고 억제
                         "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
                         "top_p": 0.9,
+                        "max_output_tokens": _MAX_OUT_TOKENS,
+                        "http_options": {"timeout": _REQ_TIMEOUT_S * 1000},  # ms
                     }
                     if "thinking" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
@@ -417,21 +450,28 @@ def call_gemini(text: str) -> str:
                         model=model, contents=text,
                         config=types.GenerateContentConfig(**cfg),
                     )
-                    return r.text
-                m = _legacy.GenerativeModel(model)
-                return m.generate_content(
-                    text,
-                    generation_config={
-                        "response_mime_type": "application/json",
-                        "temperature": 0.35,
-                        "top_p": 0.9,
-                    },
-                ).text
+                    out = _extract_json(r)
+                else:
+                    m = _legacy.GenerativeModel(model)
+                    r = m.generate_content(
+                        text,
+                        generation_config={
+                            "response_mime_type": "application/json",
+                            "temperature": 0.35, "top_p": 0.9,
+                            "max_output_tokens": _MAX_OUT_TOKENS,
+                        },
+                        request_options={"timeout": _REQ_TIMEOUT_S},
+                    )
+                    out = _extract_json(r)
+                print(f"[진행] {model} 응답 {time.monotonic() - t0:.0f}s")
+                return out
             except Exception as e:  # noqa: BLE001
                 last = e
-                wait = 2 ** attempt
-                print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
-                time.sleep(wait)
+                msg = str(e)
+                print(f"[경고] {model} {time.monotonic() - t0:.0f}s 실패: {e}")
+                if "404" in msg or "NOT_FOUND" in msg or "limit: 0" in msg:
+                    break  # 없는 모델·쿼터0 은 재시도 무의미 → 다음 모델
+                time.sleep(2 ** attempt)
     raise RuntimeError(f"Gemini 전체 실패: {last}")
 
 
@@ -669,10 +709,19 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
                     r["price"] = round((nv + target) / 2, 2)
 
 
-print("[진행] Gemini 전망 생성…")
+_BATCHES = [COMMODITIES[i:i + BATCH_SIZE] for i in range(0, len(COMMODITIES), BATCH_SIZE)]
+print(f"[진행] Gemini 전망 생성… ({len(COMMODITIES)}종 → {len(_BATCHES)}개 배치)")
 try:
-    parsed = json.loads(call_gemini(prompt))
-    commodities = parsed["commodities"]
+    commodities: dict = {}
+    for bn, chunk in enumerate(_BATCHES, 1):
+        print(f"[진행] 배치 {bn}/{len(_BATCHES)}: {', '.join(chunk)}")
+        parsed = call_gemini(build_prompt(chunk))
+        got = parsed.get("commodities") or parsed
+        missing = [k for k in chunk if k not in got]
+        if missing:
+            raise ValueError(f"배치 {bn} 응답 누락: {missing}")
+        for k in chunk:
+            commodities[k] = got[k]
     validate(commodities)
     fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
     fix_analogs(commodities)         # 유사국면 수치는 실제값 강제, AI 는 title/summary 만
