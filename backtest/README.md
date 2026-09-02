@@ -80,4 +80,32 @@ python backtest.py --calibrate --emit-calibration        # calibration.json 생�
 - 캘리브레이션이 잡아낸 것: **상하방 비대칭**(h6 상방 z=1.75 vs 하방 −1.22 =
   공급쇼크 급등 리스크가 수요약세 하락보다 두껍다) + **장기 팩테일**.
 
+## 단계 D — 통계 앙상블 → 음성결과 (production 미적용)
+
+```bash
+python backtest.py --ensemble          # 멤버 단독 MAE + equal/invmae 앙상블 비교
+python backtest.py --emit-ensemble     # ensemble.json (미커밋 — 분석용)
+```
+
+멤버 6종(stat·naive·drift·season·meanrev·mom)을 1/MAE 가중(롤링 OOS)으로 결합.
+
+| | MAE% (전 horizon) |
+|---|---|
+| **naive (랜덤워크)** | **11.48 — 전 horizon 최저** |
+| stat (현행 production) | 11.65 |
+| meanrev | 11.98 |
+| momentum | 13.26 |
+| drift(무감쇠) | 13.75 |
+| seasonal | 17.01 |
+| ens_equal / ens_invmae | 12.18 / 12.11 (baseline·naive 보다 악화) |
+
+- **랜덤워크가 최선.** 뭘 섞어도 노이즈만 추가 (멤버 간 상관 높아 분산화 이득
+  없음, non-naive 멤버는 추세장 편향). 상품 spot 이 월단위에서 랜덤워크에
+  가깝다는 기존 실증과 일치.
+- **결론**: 통계 중심선은 현행 유지. 전망의 값어치는 AI/뉴스 레이어 + 단계 C
+  밴드에 있다. 앙상블 코드는 분석 도구로만 남김. 다음은 밴드·구조(공통인자·
+  GARCH) 쪽.
+- 부수 발견: `--drift-damping 0`(중심선을 순수 naive 로)이 현행 0.2보다 OOS
+  MAE 0.17%p 낮음. 작지만 "드리프트를 더 줄여라" 방향.
+
 앞으로 어떤 변경도 `results.json` 의 pinball/커버리지가 여기서 더 나빠지면 채택 안 함.

@@ -57,6 +57,10 @@ class Cfg:
         self.min_train = a.min_train           # 이 개월수 이상 쌓여야 전망 시작
         self.horizons = tuple(range(1, a.max_h + 1))
         self.max_h = a.max_h
+        # 단계 D: 앙상블 멤버
+        self.mr_win = a.mr_win                 # 평균회귀: 장기평균 창(개월)
+        self.mom_win = a.mom_win               # 모멘텀: OLS 기울기 창(개월)
+        self.mom_damping = a.mom_damping       # 모멘텀 기울기 감쇠
 
     def as_dict(self) -> dict:
         return {
@@ -64,8 +68,19 @@ class Cfg:
             "vol_long": self.vol_long, "vol_short": self.vol_short,
             "vol_blend": self.vol_blend, "vol_floor": self.vol_floor,
             "min_train": self.min_train, "max_h": self.max_h,
-            "quantiles": list(QUANTILES),
+            "mr_win": self.mr_win, "mom_win": self.mom_win,
+            "mom_damping": self.mom_damping, "quantiles": list(QUANTILES),
         }
+
+
+def _blend_sigma(train: pd.Series, cfg: Cfg) -> float:
+    """월간 로그수익률 표준편차 = blend·장기 + (1-blend)·단기, 하한 vol_floor."""
+    lr = np.log(train / train.shift(1)).dropna()
+    if len(lr) < 6:
+        return cfg.vol_floor
+    sl = float(lr.iloc[-cfg.vol_long:].std(ddof=1))
+    ss = float(lr.iloc[-cfg.vol_short:].std(ddof=1))
+    return max(cfg.vol_blend * sl + (1.0 - cfg.vol_blend) * ss, cfg.vol_floor)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -145,6 +160,46 @@ def f_drift_naive(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
     out = {}
     for h in cfg.horizons:
         mu = math.log(p_t) + drift * h
+        sh = sigma * math.sqrt(h)
+        out[h] = {"median": math.exp(mu), "q": _q_from_lognormal(mu, sh), "mu": mu, "sigma": sh}
+    return out
+
+
+def f_meanrev(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
+    """평균회귀(AR(1) on 로그가격 편차). 장기평균 ma 로 φ^h 속도로 회귀.
+    mu_h = ma + φ^h·(lnP_t - ma). φ 는 편차의 lag-1 자기회귀계수(0~0.999 클립)."""
+    lp = np.log(train.values.astype(float))
+    if len(lp) < cfg.mr_win + 3:
+        return {}
+    ma = float(lp[-cfg.mr_win:].mean())
+    dev = lp - ma
+    x, y = dev[:-1], dev[1:]
+    denom = float(np.dot(x, x))
+    phi = float(np.dot(x, y) / denom) if denom > 0 else 0.0
+    phi = min(max(phi, 0.0), 0.999)
+    sigma = _blend_sigma(train, cfg)
+    lp_t = float(lp[-1])
+    out = {}
+    for h in cfg.horizons:
+        mu = ma + (phi ** h) * (lp_t - ma)
+        sh = sigma * math.sqrt(h)
+        out[h] = {"median": math.exp(mu), "q": _q_from_lognormal(mu, sh), "mu": mu, "sigma": sh}
+    return out
+
+
+def f_momentum(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
+    """모멘텀: 최근 mom_win 개월 로그가격의 OLS 기울기 β 를 감쇠해 외삽.
+    mu_h = lnP_t + (mom_damping·β)·h."""
+    lp = np.log(train.values.astype(float))[-cfg.mom_win:]
+    if len(lp) < 4:
+        return {}
+    xs = np.arange(len(lp), dtype=float)
+    beta = float(np.polyfit(xs, lp, 1)[0]) * cfg.mom_damping
+    sigma = _blend_sigma(train, cfg)
+    lp_t = float(np.log(train.iloc[-1]))
+    out = {}
+    for h in cfg.horizons:
+        mu = lp_t + beta * h
         sh = sigma * math.sqrt(h)
         out[h] = {"median": math.exp(mu), "q": _q_from_lognormal(mu, sh), "mu": mu, "sigma": sh}
     return out
@@ -246,6 +301,8 @@ def run(monthly: dict[str, pd.Series], cfg: Cfg) -> list[dict]:
             fn = f_naive(train, cfg)
             fd = f_drift_naive(train, cfg)
             fs = f_seasonal_naive(m, t, cfg)
+            fr = f_meanrev(train, cfg)       # 단계 D
+            fmo = f_momentum(train, cfg)     # 단계 D
             if not fm:
                 continue
             f_month = m.index[t].strftime("%Y-%m")
@@ -284,8 +341,150 @@ def run(monthly: dict[str, pd.Series], cfg: Cfg) -> list[dict]:
                     else:
                         rec[f"{tag}_abs_err_pct"] = None
                         rec[f"{tag}_pinball_pct"] = None
+                # 단계 D: 각 멤버의 median(로그) 저장 — 앙상블은 후처리에서 결합
+                for name, fx in (("stat", fm), ("naive", fn), ("drift", fd),
+                                 ("season", fs), ("meanrev", fr), ("mom", fmo)):
+                    b = fx.get(h) if fx else None
+                    rec[f"_m_{name}"] = math.log(b["median"]) if b and b["median"] > 0 else None
                 recs.append(rec)
     return recs
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# 단계 D: 앙상블 (멤버 median 결합 → C 밴드 유지)
+#   멤버: stat(감쇠드리프트) · naive(랜덤워크) · drift(무감쇠) · season(계절) ·
+#         meanrev(평균회귀) · mom(모멘텀). 앙상블 중심 = 가중 기하평균(로그공간
+#         median 의 가중평균). 밴드는 f_stat 의 sigma + (C 있으면) conformal Qz.
+#   가중: equal 또는 invmae(롤링 OOS · member×horizon 별 1/MAE, equal 로 shrink).
+# ─────────────────────────────────────────────────────────────────────────
+_MEMBERS = ("stat", "naive", "drift", "season", "meanrev", "mom")
+
+
+def _ens_record(r: dict, w_by_h: dict, calib: dict | None) -> dict:
+    """r 의 멤버 median 을 w(해당 horizon) 로 결합한 앙상블 record."""
+    h = r["horizon"]
+    w = w_by_h.get(h) or {n: 1.0 for n in _MEMBERS}
+    num = den = 0.0
+    for n in _MEMBERS:
+        lm = r.get(f"_m_{n}")
+        if lm is not None and w.get(n, 0) > 0:
+            num += w[n] * lm
+            den += w[n]
+    if den <= 0:
+        return dict(r)
+    mu = num / den
+    sig = r["_sigma"]
+    qzb = (calib or {}).get(h)                          # (z_lo, z_hi) or None
+    if qzb:
+        # C 와 동일: band-only conformal. 중간분위는 정규, 0.1/0.9 는 실측.
+        zc = {0.05: -1.6449, 0.10: qzb[0], 0.25: -0.6745, 0.50: 0.0,
+              0.75: 0.6745, 0.90: qzb[1], 0.95: 1.6449}
+        q = {lv: math.exp(mu + zc[lv] * sig) for lv in QUANTILES}
+    else:
+        q = _q_from_lognormal(mu, sig)
+    actual, anchor = r["actual"], r["anchor"]
+    err = (math.exp(mu) / actual - 1.0) * 100.0
+    out = dict(r)
+    out.update({
+        "_mu": mu, "median": round(math.exp(mu), 4),
+        "q10": round(q[0.10], 4), "q25": round(q[0.25], 4),
+        "q75": round(q[0.75], 4), "q90": round(q[0.90], 4),
+        "err_pct": round(err, 3), "abs_err_pct": round(abs(err), 3),
+        "pinball_pct": round(pinball_pct(actual, q, anchor), 4),
+        "in80": bool(q[0.10] <= actual <= q[0.90]),
+        "in50": bool(q[0.25] <= actual <= q[0.75]),
+        "pit": round(pit_value(actual, mu, sig), 4),
+    })
+    return out
+
+
+def _member_abs_err(r: dict, name: str) -> float | None:
+    lm = r.get(f"_m_{name}")
+    if lm is None:
+        return None
+    return abs(math.exp(lm) / r["actual"] - 1.0) * 100.0
+
+
+def ensemble_equal(records: list[dict], calib: dict | None) -> list[dict]:
+    return [_ens_record(r, {}, calib) for r in records]
+
+
+def _weights_from_pool(err_pool: dict, all_h, shrink: float, warmup: int) -> dict:
+    w_by_h = {}
+    eq = 1.0 / len(_MEMBERS)
+    for h in all_h:
+        ws = {}
+        for n in _MEMBERS:
+            es = err_pool.get((h, n), [])
+            if len(es) >= warmup:
+                ws[n] = 1.0 / max(sum(es) / len(es), 1e-6)
+        if ws:
+            s = sum(ws.values())
+            w_by_h[h] = {n: (1 - shrink) * (ws.get(n, 0.0) / s) + shrink * eq
+                         for n in _MEMBERS}
+    return w_by_h
+
+
+def ensemble_invmae(records: list[dict], calib: dict | None,
+                    shrink: float, warmup: int) -> list[dict]:
+    """롤링 OOS: 각 전망월의 가중치는 그 이전에 실현된 멤버별 오차로만 적합."""
+    recs = sorted(records, key=lambda r: (r["forecast_month"], r["commodity"], r["horizon"]))
+    all_h = sorted({r["horizon"] for r in recs})
+    err_pool: dict[tuple[int, str], list[float]] = {}
+    staged: list[tuple[str, int, dict]] = []
+    out, cur_fm, w_by_h = [], None, {}
+    for r in recs:
+        fm = r["forecast_month"]
+        if fm != cur_fm:
+            keep = []
+            for tm, h, rr in staged:
+                if tm < fm:
+                    for n in _MEMBERS:
+                        e = _member_abs_err(rr, n)
+                        if e is not None:
+                            err_pool.setdefault((h, n), []).append(e)
+                else:
+                    keep.append((tm, h, rr))
+            staged, cur_fm = keep, fm
+            w_by_h = _weights_from_pool(err_pool, all_h, shrink, warmup)
+        out.append(_ens_record(r, w_by_h, calib))
+        staged.append((r["target_month"], r["horizon"], r))
+    return out
+
+
+def emit_ensemble(records: list[dict], shrink: float, warmup: int) -> dict:
+    """전체 이력으로 horizon별 최종 앙상블 가중치 → ensemble.json."""
+    by_hn: dict[tuple[int, str], list[float]] = {}
+    for r in records:
+        for n in _MEMBERS:
+            e = _member_abs_err(r, n)
+            if e is not None:
+                by_hn.setdefault((r["horizon"], n), []).append(e)
+    hs = sorted({h for (h, _) in by_hn})
+    fit = {}
+    for h in hs:
+        ws = {}
+        for n in _MEMBERS:
+            es = by_hn.get((h, n), [])
+            if len(es) >= warmup:
+                ws[n] = 1.0 / max(sum(es) / len(es), 1e-6)
+        if not ws:
+            continue
+        s = sum(ws.values())
+        inv = {n: ws.get(n, 0.0) / s for n in _MEMBERS}
+        eq = 1.0 / len(_MEMBERS)
+        fit[str(h)] = {n: round((1 - shrink) * inv[n] + shrink * eq, 4) for n in _MEMBERS}
+    return {
+        "generated_at": datetime.now(_KST).strftime("%Y-%m-%d %H:%M"),
+        "method": ("forecast combination. 앙상블 중심 = Σ w_n·ln(median_n) / Σ w_n "
+                   "(로그공간 가중평균 = 가중 기하평균). w_n ∝ 1/MAE_n (horizon별), "
+                   f"equal({eq:.3f})로 shrink={shrink}. 밴드는 f_stat sigma + calibration.json."),
+        "members": list(_MEMBERS),
+        "shrink": shrink, "warmup": warmup,
+        "by_horizon": fit,
+        "note": ("analyze.py 가 이 가중치로 통계 중심선을 만들고, calibration.json 으로 "
+                 "밴드를 뽑는다. 파일 없으면 f_stat 단독(=단계 C 상태)."),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -352,6 +551,26 @@ def pit_histogram(rows: list[dict], bins: int = 10) -> list[int]:
 # ─────────────────────────────────────────────────────────────────────────
 def _emp_quantiles(z: np.ndarray) -> dict:
     return {lv: round(float(np.quantile(z, lv)), 4) for lv in QUANTILES}
+
+
+def load_calibration_local(path: str = "calibration.json") -> dict:
+    """calibration.json → {horizon(int): (z_lo, z_hi)}. 없으면 {} (정규 항등).
+    _common.load_calibration 과 동형이지만 backtest 는 _common(=yfinance) 을
+    import 안 하려고 별도 구현."""
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for hs, v in (d.get("by_horizon") or {}).items():
+        qb = (v or {}).get("qz_band") or {}
+        try:
+            lo, hi = float(qb["0.1"]), float(qb["0.9"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if lo < 0 < hi:
+            out[int(hs)] = (lo, hi)
+    return out
 
 
 def _recal_record(r: dict, qz: dict | None, poolz: np.ndarray | None,
@@ -468,6 +687,17 @@ def main() -> None:
                     help="model=중앙값은 모델값 유지(스프레드만 보정), conformal=중앙값도 이동")
     ap.add_argument("--emit-calibration", action="store_true",
                     help="전체 이력으로 calibration.json (production 이 읽을 파일) 생성")
+    # 단계 D: 앙상블
+    ap.add_argument("--mr-win", type=int, default=24, help="평균회귀 장기평균 창(개월)")
+    ap.add_argument("--mom-win", type=int, default=6, help="모멘텀 OLS 기울기 창(개월)")
+    ap.add_argument("--mom-damping", type=float, default=0.5, help="모멘텀 기울기 감쇠")
+    ap.add_argument("--ensemble", action="store_true",
+                    help="단계 D: equal·invmae 앙상블 결과도 산출·비교 (calibration.json 위에서)")
+    ap.add_argument("--ens-shrink", type=float, default=0.3, help="invmae 가중을 equal 로 shrink")
+    ap.add_argument("--ens-warmup", type=int, default=24,
+                    help="member×horizon 별 실현오차 이 개수 이상이어야 invmae 가중 적용")
+    ap.add_argument("--emit-ensemble", action="store_true",
+                    help="전체 이력으로 ensemble.json (production 가중치) 생성")
     a = ap.parse_args()
     cfg = Cfg(a)
 
@@ -523,6 +753,57 @@ def main() -> None:
         results["calibration_emitted"] = cal
         print("[생성] calibration.json (production 이 읽을 파일)")
 
+    # ── 단계 D: 앙상블 (calibration.json 밴드 위에서) ──
+    ens_cmp = None
+    if a.ensemble or a.emit_ensemble:
+        _cal = load_calibration_local()          # {h: (z_lo, z_hi)} or {}
+        base_c = calibrate_rolling(recs, a.cal_warmup, "model") if _cal else recs
+        variants = {
+            "baseline(+C)": base_c,
+            "ens_equal": ensemble_equal(recs, _cal),
+            "ens_invmae": ensemble_invmae(recs, _cal, a.ens_shrink, a.ens_warmup),
+        }
+        ens_cmp = {}
+        for name, rr in variants.items():
+            bh = {}
+            for r in rr:
+                bh.setdefault(r["horizon"], []).append(r)
+            ens_cmp[name] = {
+                "overall": _agg(rr, with_dm=cfg.max_h),
+                "by_horizon": {str(h): _agg(bh[h]) for h in sorted(bh)},
+            }
+        # 멤버 단독 MAE% (어떤 멤버가 쓸모있나 — 음성결과의 근거)
+        member_mae = {}
+        for n in _MEMBERS:
+            allh, byh = [], {}
+            for r in recs:
+                e = _member_abs_err(r, n)
+                if e is not None:
+                    allh.append(e)
+                    byh.setdefault(r["horizon"], []).append(e)
+            member_mae[n] = {
+                "all": _mean(allh),
+                "by_h": {str(h): _mean(v) for h, v in sorted(byh.items())},
+            }
+        results["ensemble_run"] = {
+            "params": {"members": list(_MEMBERS), "shrink": a.ens_shrink,
+                       "warmup": a.ens_warmup, "mr_win": a.mr_win,
+                       "mom_win": a.mom_win, "mom_damping": a.mom_damping,
+                       "on_calibration": bool(_cal)},
+            "member_mae_pct": member_mae,
+            "variants": ens_cmp,
+            "verdict": ("음성. naive(랜덤워크)가 전 horizon 최저 MAE. 앙상블(equal/invmae "
+                        "모두)이 baseline·naive 보다 MAE·pinball 악화 → production 미적용. "
+                        "전망의 값어치는 AI/뉴스 레이어 + 단계 C 밴드에 있음(통계 중심선 아님)."),
+        }
+
+    if a.emit_ensemble:
+        ens = emit_ensemble(recs, a.ens_shrink, a.ens_warmup)
+        with open("ensemble.json", "w", encoding="utf-8") as f:
+            json.dump(ens, f, ensure_ascii=False, indent=2)
+        results["ensemble_emitted"] = ens
+        print("[생성] ensemble.json (production 가중치)")
+
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(f"{OUT_DIR}/results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -552,6 +833,10 @@ def main() -> None:
               f"cov80 {o['cov80']}→{co['cov80']} (목표 .80), "
               f"PIT_D {o['pit_ks_D']}→{co['pit_ks_D']}")
     print(f"  DM* vs 나이브={_s(o.get('dm_vs_naive_stat'))} p={_s(o.get('dm_vs_naive_p'))}")
+    if ens_cmp is not None:
+        print("  ── 단계 D: 앙상블 (C 밴드 위) ──")
+        for name, v in ens_cmp.items():
+            _line(name, v["overall"])
     print(f"  → {OUT_DIR}/results.json" + ("" if a.no_csv else f" · {OUT_DIR}/records.csv"))
     for h in sorted(by_h):
         ah = results["by_horizon"][str(h)]
@@ -559,6 +844,9 @@ def main() -> None:
         if cal_recs is not None:
             ch = results["calibration_run"]["by_horizon"].get(str(h), {})
             extra = f"  →보정 MAE%={_s(ch.get('mae_pct'))} cov80={_s(ch.get('cov80'))}"
+        if ens_cmp is not None:
+            eh = ens_cmp["ens_invmae"]["by_horizon"].get(str(h), {})
+            extra += f"  →ens MAE%={_s(eh.get('mae_pct'))}"
         print(f"   h={h}: MAE%={_s(ah['mae_pct'], 7)}  cov80={_s(ah['cov80'], 6)}  "
               f"skill={_s(ah['skill_vs_naive'], 7)}{extra}")
 
@@ -669,6 +957,27 @@ if __name__ == "__main__":
 #   · 한계: horizon별 전역 pooling(품목 무관) — 품목별 잔차 분포 차이는 무시
 #     (steel n 부족 때문에 의도적). 상관·군집은 단계 E/F. 잔차 vintage 는
 #     현재 CSV 기준.
+#
+# [단계 D — 앙상블 (--ensemble / --emit-ensemble) → 음성결과, production 미적용]
+#   · 멤버: stat(감쇠드리프트) · naive(랜덤워크) · drift(무감쇠) · season(계절) ·
+#     meanrev(AR(1) 평균회귀) · mom(OLS 기울기 모멘텀). 앙상블 중심 = 로그공간
+#     median 의 가중평균(가중 기하평균). 가중 = 1/MAE (horizon별, equal 로 shrink),
+#     롤링 OOS 로만 적합. 밴드는 f_stat sigma + calibration.json.
+#   · 멤버 단독 OOS MAE%(전 horizon): naive 11.48 < stat 11.65 < meanrev 11.98
+#     < mom 13.26 < drift 13.75 < season 17.01. **랜덤워크가 전 horizon 최저.**
+#   · 앙상블 결과(C 밴드 위, 5,622건): equal MAE 12.18 / invmae MAE 12.11 —
+#     baseline+C(11.65)·naive(11.48) 보다 **악화**. shrink=0(순수 invmae)도 12.08.
+#   · 원인: 최선 모델(naive)에 뭘 섞어도 노이즈만 추가된다. 멤버들이 서로
+#     높은 상관이라 분산화 이득이 없고, non-naive 멤버는 (2019~26 추세장에서)
+#     체계적 편향을 갖는다. 이는 상품 spot 이 월단위에서 랜덤워크에 가깝다는
+#     기존 실증(Meese-Rogoff 류)과 일치.
+#   · 결론: 통계 중심선은 현행 유지(damped drift ≈ naive). 전망의 값어치는
+#     (a) AI/뉴스 레이어(공급쇼크·정책·재고 — 가격만으론 안 보임)와
+#     (b) 단계 C 의 캘리브레이션된 비대칭 밴드에 있다. 앙상블 코드는 분석
+#     도구로만 남기고(ensemble.json 미커밋·미적용), 단계 E/F 는 밴드·구조
+#     쪽(공통인자·GARCH)에 집중.
+#   · 참고로 --drift-damping 0 (= 중심선을 순수 naive 로) 이 현행 0.2 보다
+#     OOS MAE 가 0.17%p 낮다. 효과는 작지만 방향은 "드리프트를 더 줄여라".
 #
 # [알려진 한계 / 다음 단계에서 다룰 것]
 #   · expanding window 라 초기 시점은 훈련량이 적다(min_train=36 로 하한).
