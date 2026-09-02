@@ -131,4 +131,34 @@ python backtest.py --vol-model garch --emit-calibration     # garch 기준 calib
 - production: `analyze.calculate_statistical_bounds` 가 36/6m 블렌드 → GARCH.
   `calibration.json` 은 `--vol-model garch` 로 재생성해야 잔차 기준이 맞음.
 
-앞으로 어떤 변경도 `results.json` 의 pinball/커버리지가 여기서 더 나빠지면 채택 안 함.
+## 단계 E — 공통 변동성 팩터 → 음성결과 (production 미적용)
+
+```bash
+python backtest.py --compare-factor          # garch vs factor (+C)
+```
+
+r_i = β_i·F + ε_i (F = 12종 등가중 월간 로그수익률 '지수'). σ²_{i,h} =
+β_i²·Var(F_h) + Var(ε_i,h), 각 항 GARCH 누적.
+
+| (C 위) | pinball% | cov80 | skill vs naive |
+|---|---|---|---|
+| garch +C | **4.007** | 0.798 | **+0.005** |
+| factor +C | 4.039 | 0.801 | −0.003 |
+
+- factor+C 가 pinball 악화 + F 가 얻은 유의 스킬을 도로 까먹음. GARCH 를 2번
+  + 회귀 1번 = 추정 노이즈 증가, 12종·월단위에서 공통팩터 안정화 이득이 그
+  노이즈를 못 이김. per-commodity GARCH 가 이미 공통 국면을 충분히 잡음.
+- 패턴: 밴드를 건드리되 **단순한** 변경(C conformal, F GARCH)은 통과,
+  **모델 복잡도를 키우는** 변경(D 앙상블, E 팩터분해)은 탈락.
+
+## 종합 (C·D·E·F)
+
+| 단계 | 내용 | 판정 | production |
+|---|---|---|---|
+| C | split-conformal 밴드 분위 | 채택(트레이드오프 有) | `calibration.json` |
+| D | 통계 앙상블(중심선) | 음성 | 변경 없음 |
+| F | GARCH 변동성 term-structure | **채택(개선만)** | `analyze` 밴드 vol |
+| E | 공통 변동성 팩터 | 음성 | 변경 없음 |
+
+최종 통계 밴드(garch+C): pinball 4.007 · cov80 0.798 · **나이브 대비 스킬 DM p=0.011
+(유의)**. 중심선은 랜덤워크 근처 유지. 앞으로 어떤 변경도 이보다 나빠지면 채택 안 함.

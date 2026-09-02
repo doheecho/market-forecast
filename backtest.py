@@ -166,9 +166,35 @@ def _q_from_lognormal(mu: float, sigma: float) -> dict[float, float]:
     return {lv: math.exp(mu + _N01.inv_cdf(lv) * sigma) for lv in QUANTILES}
 
 
-def f_stat(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
-    """analyze.py calculate_statistical_bounds 재현: 감쇠 드리프트 + 변동성 term-structure.
-    vol_model='sqrt' = σ_1·√h (현행). 'garch' = GARCH(1,1) h개월 누적."""
+def _factor_sigma_path(lr: pd.Series, cfg: Cfg, panel: pd.DataFrame, key: str) -> np.ndarray | None:
+    """단계 E: 공통 변동성 팩터. r_i = β_i·F + ε_i (F = 12종 등가중 월간 로그수익률
+    '원자재지수'). σ²_{i,h} = β_i²·Var(F_h) + Var(ε_i,h), 각 항은 GARCH 누적.
+    → 공통 국면(2020·2022 등)에 모든 밴드가 함께 팽창. 불가 시 None(→ GARCH 폴백)."""
+    if panel is None or key not in panel.columns:
+        return None
+    P = panel.loc[:lr.index[-1]].dropna(how="all")
+    F = P.mean(axis=1, skipna=True).dropna()
+    ri = P[key].dropna()
+    idx = F.index.intersection(ri.index)
+    if len(idx) < 30:
+        return None
+    Fv, rv = F.loc[idx].to_numpy(), ri.loc[idx].to_numpy()
+    vF = float(np.var(Fv, ddof=1))
+    if vF <= 0:
+        return None
+    beta = float(np.cov(rv, Fv, ddof=1)[0, 1] / vF)
+    eps = rv - beta * Fv
+    sF = _garch_sigma_path(Fv, cfg.max_h, cfg.vol_floor)      # 누적 stdev
+    sE = _garch_sigma_path(eps, cfg.max_h, cfg.vol_floor)
+    out = np.sqrt((beta ** 2) * sF ** 2 + sE ** 2)
+    floor = np.array([cfg.vol_floor * math.sqrt(h) for h in range(1, cfg.max_h + 1)])
+    return np.maximum(out, floor)
+
+
+def f_stat(train: pd.Series, cfg: Cfg, panel: pd.DataFrame | None = None,
+           key: str | None = None) -> dict[int, dict]:
+    """감쇠 드리프트 + 변동성 term-structure. vol_model: sqrt=σ_1·√h(현행),
+    garch=GARCH(1,1) 누적(단계 F), factor=공통 변동성 팩터(단계 E)."""
     p_t = float(train.iloc[-1])
     lr = np.log(train / train.shift(1)).dropna()
     if len(lr) < 6:
@@ -177,9 +203,12 @@ def f_stat(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
     sig_short = float(lr.iloc[-cfg.vol_short:].std(ddof=1))
     sigma = max(cfg.vol_blend * sig_long + (1.0 - cfg.vol_blend) * sig_short, cfg.vol_floor)
     drift = float(lr.iloc[-cfg.drift_win:].mean()) * cfg.drift_damping
-    if cfg.vol_model == "garch":
+    sig_h = None
+    if cfg.vol_model == "factor":
+        sig_h = _factor_sigma_path(lr, cfg, panel, key)
+    if sig_h is None and cfg.vol_model in ("garch", "factor"):
         sig_h = _garch_sigma_path(lr.to_numpy(), cfg.max_h, cfg.vol_floor)
-    else:
+    if sig_h is None:
         sig_h = np.array([sigma * math.sqrt(h) for h in range(1, cfg.max_h + 1)])
     out = {}
     for h in cfg.horizons:
@@ -348,14 +377,22 @@ def ks_uniform(pits: list[float]) -> tuple[float, float, int]:
 # ─────────────────────────────────────────────────────────────────────────
 # 워크포워드 루프
 # ─────────────────────────────────────────────────────────────────────────
-def run(monthly: dict[str, pd.Series], cfg: Cfg) -> list[dict]:
+def _build_panel(monthly: dict[str, pd.Series]) -> pd.DataFrame:
+    """12종 월간 로그수익률 패널 (index 합집합, 결측 NaN)."""
+    return pd.DataFrame({k: np.log(m / m.shift(1)) for k, m in monthly.items()})
+
+
+def run(monthly: dict[str, pd.Series], cfg: Cfg,
+        panel: pd.DataFrame | None = None) -> list[dict]:
     recs: list[dict] = []
+    if panel is None and cfg.vol_model == "factor":
+        panel = _build_panel(monthly)
     for k, m in sorted(monthly.items()):
         n = len(m)
         # 전망 시점 t: min_train-1 부터, h개월 뒤 실제가가 존재하는 마지막까지
         for t in range(cfg.min_train - 1, n - 1):
             train = m.iloc[:t + 1]
-            fm = f_stat(train, cfg)
+            fm = f_stat(train, cfg, panel, k)
             fn = f_naive(train, cfg)
             fd = f_drift_naive(train, cfg)
             fs = f_seasonal_naive(m, t, cfg)
@@ -736,10 +773,12 @@ def main() -> None:
     ap.add_argument("--vol-floor", type=float, default=0.015)
     ap.add_argument("--min-train", type=int, default=36)
     ap.add_argument("--max-h", type=int, default=6)
-    ap.add_argument("--vol-model", choices=("sqrt", "garch"), default="sqrt",
-                    help="단계 F: 밴드 변동성 term-structure. sqrt=σ_1·√h(현행), garch=GARCH(1,1) 누적")
+    ap.add_argument("--vol-model", choices=("sqrt", "garch", "factor"), default="sqrt",
+                    help="밴드 변동성: sqrt=σ_1·√h(현행), garch=GARCH 누적(F), factor=공통변동성팩터(E)")
     ap.add_argument("--compare-garch", action="store_true",
                     help="단계 F: sqrt vs garch 를 한 번에 비교(+calibration)")
+    ap.add_argument("--compare-factor", action="store_true",
+                    help="단계 E: garch vs factor 를 한 번에 비교(+calibration)")
     ap.add_argument("--no-csv", action="store_true", help="records.csv 미출력")
     ap.add_argument("--calibrate", action="store_true",
                     help="단계 C: 롤링 OOS split-conformal 재캘리브레이션 결과도 산출·비교")
@@ -891,6 +930,32 @@ def main() -> None:
             }
         results["garch_run"] = garch_cmp
 
+    # ── 단계 E: garch vs factor (공통 변동성 팩터) ──
+    factor_cmp = None
+    if a.compare_factor:
+        gcfg, fcfg = Cfg(a), Cfg(a)
+        gcfg.vol_model, fcfg.vol_model = "garch", "factor"
+        pnl = _build_panel(monthly)
+        grecs2 = recs if cfg.vol_model == "garch" else run(monthly, gcfg)
+        frecs = recs if cfg.vol_model == "factor" else run(monthly, fcfg, pnl)
+        _w = a.cal_warmup
+        rows_by = {
+            "garch": grecs2,
+            "garch +C": calibrate_rolling(grecs2, _w, "model"),
+            "factor": frecs,
+            "factor +C": calibrate_rolling(frecs, _w, "model"),
+        }
+        factor_cmp = {}
+        for name, rr in rows_by.items():
+            bh = {}
+            for r in rr:
+                bh.setdefault(r["horizon"], []).append(r)
+            factor_cmp[name] = {
+                "overall": _agg(rr, with_dm=cfg.max_h),
+                "by_horizon": {str(h): _agg(bh[h]) for h in sorted(bh)},
+            }
+        results["factor_run"] = factor_cmp
+
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(f"{OUT_DIR}/results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -928,11 +993,15 @@ def main() -> None:
         print("  ── 단계 F: 변동성 term-structure ──")
         for name, v in garch_cmp.items():
             _line(name, v["overall"])
+    if factor_cmp is not None:
+        print("  ── 단계 E: 공통 변동성 팩터 ──")
+        for name, v in factor_cmp.items():
+            _line(name, v["overall"])
         for h in sorted(by_h):
-            sc = garch_cmp["sqrt +C"]["by_horizon"].get(str(h), {})
-            gc = garch_cmp["garch +C"]["by_horizon"].get(str(h), {})
-            print(f"     h={h}: cov80 sqrt+C={_s(sc.get('cov80'))} garch+C={_s(gc.get('cov80'))}"
-                  f"  pinball sqrt+C={_s(sc.get('pinball_pct'))} garch+C={_s(gc.get('pinball_pct'))}")
+            gc = factor_cmp["garch +C"]["by_horizon"].get(str(h), {})
+            fc = factor_cmp["factor +C"]["by_horizon"].get(str(h), {})
+            print(f"     h={h}: cov80 garch+C={_s(gc.get('cov80'))} factor+C={_s(fc.get('cov80'))}"
+                  f"  pinball garch+C={_s(gc.get('pinball_pct'))} factor+C={_s(fc.get('pinball_pct'))}")
     print(f"  → {OUT_DIR}/results.json" + ("" if a.no_csv else f" · {OUT_DIR}/records.csv"))
     for h in sorted(by_h):
         ah = results["by_horizon"][str(h)]
@@ -1102,9 +1171,27 @@ if __name__ == "__main__":
 #     _common.garch_sigma_path(월간 로그수익률, months_ahead, floor) 사용.
 #     calibration.json 은 반드시 --vol-model garch 로 재생성해야 잔차 기준이
 #     맞는다: python backtest.py --vol-model garch --emit-calibration.
-#   · 한계: 월 12종 각각 독립 GARCH(공통 변동성 팩터 무시 = 단계 E). 그리드
-#     추정이라 MLE 최적점은 아님(스킬 차이엔 영향 미미). 정규분포 조건부
-#     가정(팩테일은 C 의 conformal 이 흡수).
+#   · 한계: 월 12종 각각 독립 GARCH. 그리드 추정이라 MLE 최적점은 아님
+#     (스킬 차이엔 영향 미미). 정규분포 조건부 가정(팩테일은 C 의 conformal 이 흡수).
+#
+# [단계 E — 공통 변동성 팩터 (--vol-model factor / --compare-factor) → 음성결과, 미적용]
+#   · 아이디어: r_i = β_i·F + ε_i. F = 12종 등가중 월간 로그수익률('원자재지수').
+#     σ²_{i,h} = β_i²·Var(F_h) + Var(ε_i,h), 각 항 GARCH 누적. 기대효과: 공통
+#     국면(2020 코로나·2022 에너지)에 모든 밴드가 함께 팽창, 공통분산은 12종에서
+#     추정하니 더 안정.
+#   · 결과(5,622건, C 위): factor+C pinball 4.039 (garch+C 4.007 보다 악화),
+#     cov80 .801 (garch+C .798 과 사실상 동일), skill_vs_naive -0.003 (garch+C
+#     +0.005 → F 가 얻은 유의 스킬을 도로 까먹음), PIT_D 도 소폭 악화.
+#   · 게이트: 탈락. 원인: 분산을 β²Var(F)+Var(ε) 로 쪼개고 GARCH 를 2번 + 회귀
+#     1번 돌리면서 추정 노이즈가 늘고, 12종·월단위에서 공통팩터의 안정화 이득이
+#     그 노이즈를 못 이긴다. per-commodity GARCH(단계 F)가 이미 공통 국면 변화를
+#     (자기 시계열에 반영되는 시점에) 충분히 잡고 있음.
+#   · 결론: production 미적용. 팩터 코드는 분석 도구로만. 패턴이 뚜렷하다 —
+#     밴드를 건드리되 단순한 변경(C 의 conformal, F 의 GARCH)은 통과, 모델
+#     복잡도를 키우는 변경(D 앙상블, E 팩터분해)은 탈락.
+#   · 남는 E 아이디어(미구현): 계층적(부분 pooling) 캘리브레이션 — C 의 전역
+#     pooling 을 품목별 qz 로 shrink. 횡단면 타당성 체크(12종 전망이 지수로
+#     환산 시 그럴듯한지) 는 진단용으로만.
 #
 # [알려진 한계 / 다음 단계에서 다룰 것]
 #   · expanding window 라 초기 시점은 훈련량이 적다(min_train=36 로 하한).
