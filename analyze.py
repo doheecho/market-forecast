@@ -17,7 +17,7 @@ import pandas as pd
 
 from _common import (
     COMMODITIES, META, build_history, fetch_raw, latest_macro,
-    merge_manual, save_snapshot, today_str,
+    load_manual_history, today_str,
 )
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -25,14 +25,12 @@ if not API_KEY:
     sys.exit("[에러] GEMINI_API_KEY 환경변수가 없습니다.")
 
 # 모델: 환경변수(GEMINI_MODEL, 쉼표구분)로 재정의 가능. 앞에서부터 순서대로 시도.
-# gemini-1.5/2.5 계열은 전부 404(신규 사용자 불가)라 목록에서 뺐다. flash 계열 alias 를
-# 먼저 두어 다음 세대 교체 때 자동으로 따라가게 하고, pro-preview 는 마지막 폴백.
-# (pro 는 무료 티어 쿼터가 0 이라 유료 프로젝트에서만 성공 — 그래서 맨 뒤)
+# 사용자 환경의 API 게이트웨이 권장 사항인 gemini-3.6-flash 및 gemini-3.1-pro-preview를 우선 탐색합니다.
 MODELS = [m.strip() for m in os.environ.get("GEMINI_MODEL", "").split(",") if m.strip()] or [
-    "gemini-flash-latest",
     "gemini-3.6-flash",
-    "gemini-flash-lite-latest",
     "gemini-3.1-pro-preview",
+    # gemini-1.5-flash/1.5-pro/2.5-flash/2.5-pro 는 2026-09-02 부터 404(신규 사용자 불가)
+    # 라 폴백 목록에서 제외. 이 두 줄 외에는 9/1(정상 동작) 버전 그대로.
 ]
 
 try:
@@ -52,9 +50,10 @@ history, spot = build_history(raw)
 if not any(history.values()):
     sys.exit("[에러] 원자재 시계열을 하나도 수집하지 못했습니다.")
 
-# manual/<key>.csv 를 1차 시세 소스로 적용(CSV 있는 키는 야후 시리즈까지 비워
-# 통계 밴드·유사국면·EWMA 도 CSV 기준). CSV 없는 키(steel 등)만 야후 폴백.
-for _k in merge_manual(history, spot, raw):
+# 야후에 없는 품목(니켈·아연·텅스텐)은 manual/<key>.csv 로 주입 → COMMODITIES 에 편입.
+for _k, _rows in load_manual_history().items():
+    history[_k] = _rows
+    spot[_k] = _rows[-1]["price"]
     if _k not in COMMODITIES:
         COMMODITIES.append(_k)
 
@@ -302,7 +301,7 @@ FACTORS = {
             "중국 자동차·백색가전 도금강판 수요, 다이캐스팅 합금 수요",
     "tungsten": "매크로: 절삭공구·초경합금 수요(글로벌 제조업 CAPEX), 방산·항공우주 수요, 미·중 갈등. "
                 "마이크로: 중국(세계 80%+) 채굴·수출 쿼터 및 수출통제, APT(암모늄파라텅스텐) 유럽 고시가, "
-                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공급망 다변화",
+                "중국 광산 품위 저하, 스크랩(초경 재생) 회수율, 미국·EU 전략비축·공망 다변화",
     "silicon": "매크로: 중국 제조업 PMI, 글로벌 철강 수요 (합금철 원료), 석탄 및 전력 단가 (제조 에너지 비용), 달러·위안화. "
                "마이크로: Ferro Silicon (FeSi 75%) 중국 생산량 및 가동률, 중국 수출 관세 정책, 주요 철강 제련소(포스코 등) 계약단가 추이, "
                "중국 FOB 선적 요율, 규석(원료) 및 전극봉 가격, 글로벌 자동차 알루미늄 다이캐스팅 수요",
@@ -318,8 +317,12 @@ SCHEMA_ONE = """{
   "monthly_forecast_bear": [ {"month": "2026-09", "price": 0.0, "rationale": "해당 월 비관 시나리오 가격 근거(하방 요인 중심) 한 문장"} ],
   "rationale_base": "기본 시나리오 요약", "rationale_bull": "낙관 요약", "rationale_bear": "비관 요약",
   "metrics": [ {"label": "위안화 환율", "val": "6.7222 (USD/CNY)", "date": "2026.08.27", "cat": "수요", "status": "보통", "badge": "secondary"} ],
-  "analogs": [ {"title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
-  "analogs_6m": [ {"title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
+  "analogs": [ {"period": "(주어진 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "title": "그 시기에 실제 있었던 역사적 사건명", "summary": "그 국면의 수급/매크로 배경 요약"} ],
+  "analogs_6m": [ {"period": "(6개월 리스트의 값 그대로)", "similarity": "(주어진 값)", "actual": "(주어진 값)",
+    "miniHist": "(주어진 배열 그대로)", "miniForecast": "(주어진 배열 그대로)",
+    "title": "그 시기 실제 사건명", "summary": "그 국면 배경 요약"} ]
 }"""
 
 _KEYS_STR = ", ".join(COMMODITIES)
@@ -350,10 +353,10 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 - metrics 는 각 원자재의 아래 '주요 영향 요인' 중 현시점에서 가격에 영향이 큰 것 위주로
   6~8개 선정하고(매크로·마이크로 균형있게), label 에 지표명, val 에 최신 추정치 and 단위,
   cat(공급/수요/투자/매크로)·status(강세/보통/약세)·badge 를 채우세요.
-- analogs 는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
-  각 항목당 {{title, summary}} 객체 1개씩, **리스트 순서·개수 그대로** 만드세요(비어 있으면 빈 배열).
-  수치(period·similarity·actual·miniHist·miniForecast)는 시스템이 실제값으로 채우므로
-  **절대 출력하지 마세요**. title=그 시기 실제 사건명, summary=그 국면의 수급/매크로 배경.
+- analogs는 아래 '실제 과거 유사국면(1년)', analogs_6m 은 '실제 과거 유사국면(6개월)' 리스트의
+  각 항목당 1개씩 만드세요(리스트 순서·개수 그대로. 리스트가 비어 있으면 빈 배열).
+  period/similarity/actual/miniHist/miniForecast 는 주어진 값을 **그대로 복사**(임의 생성 금지),
+  title(그 시기 실제 사건명)·summary 만 각 항목에 맞게 채우세요.
 - advisor 는 최근 시황 → 글로벌 정세 → 주요 뉴스 → 구매 담당자 대응 조언 순의 3~4문장.
   최근 시황은 이 원자재의 최근 단가변동과 단가추이를 보여주면서최근의 글로벌 정세에 대해서 함께 설명해주는게 좋을것같아.
   전반적으로 증권사들 보고하는 형태로 풀어주고, 그 이후에 원자재의 연관된 주요 뉴스들을 매크로/마이크로시점에서 각각 풀어써줘
@@ -395,55 +398,18 @@ prompt = f"""당신은 글로벌 원자재/거시경제 퀀트 애널리스트�
 """
 
 
-# 12종 × (base/bull/bear 6개월 + metrics + analogs + advisor) 는 출력이 매우 길다.
-# max_output_tokens 를 넉넉히 주지 않으면 응답이 중간에 잘려 JSON 파싱이 깨진다.
-_MAX_OUT_TOKENS = 24576      # 12종 전망 실제 출력은 ~1만 토큰 — 넉넉하되 폭주 억제
-_REQ_TIMEOUT_S = 180        # 한 번의 Gemini 호출 상한(초). 연결이 멈춰도 여기서 끊고 다음으로
-
-
-def _extract_json(resp) -> dict:
-    """SDK 응답에서 JSON 본문을 파싱. 코드펜스·앞뒤 잡텍스트·잘림을 방어하고,
-    실패 시 원인(길이·끝부분·finish_reason)을 메시지에 담아 던진다."""
-    txt = (getattr(resp, "text", None) or "").strip()
-    fr = None
-    try:
-        fr = str(resp.candidates[0].finish_reason)
-    except Exception:  # noqa: BLE001
-        pass
-    if not txt:
-        raise ValueError(f"빈 응답 (finish_reason={fr})")
-    if txt.startswith("```"):                       # ```json … ``` 방어
-        txt = txt[3:]
-        if txt[:4].lower() == "json":
-            txt = txt[4:]
-        txt = txt.split("```", 1)[0]
-    i, j = txt.find("{"), txt.rfind("}")            # 첫 '{' ~ 마지막 '}' 만
-    if i >= 0 and j > i:
-        txt = txt[i:j + 1]
-    try:
-        return json.loads(txt)
-    except json.JSONDecodeError as e:
-        raise ValueError(
-            f"JSON 파싱 실패: {e} · finish_reason={fr} · 길이 {len(txt)} · "
-            f"끝부분=…{txt[-200:]!r}"
-        ) from e
-
-
-def call_gemini(text: str) -> dict:
+def call_gemini(text: str) -> str:
     last = None
     for model in MODELS:
         for attempt in range(1, 3):
-            t0 = time.monotonic()
             try:
-                print(f"[진행] {model} 호출 (시도 {attempt}, 타임아웃 {_REQ_TIMEOUT_S}s)…")
+                print(f"[진행] {model} 호출 (시도 {attempt})…")
                 if _NEW_SDK:
                     cfg = {
                         "response_mime_type": "application/json",
                         "automatic_function_calling": {"disable": True},  # AFC 경고 억제
                         "temperature": 0.35,  # 월별 변동은 살리되 실행 간 안정은 clamp_vs_previous 로
                         "top_p": 0.9,
-                        "max_output_tokens": _MAX_OUT_TOKENS,
-                        "http_options": {"timeout": _REQ_TIMEOUT_S * 1000},  # ms
                     }
                     if "thinking" in model:
                         cfg["thinking_config"] = {"thinking_budget": 0}  # 사고 지연 제거
@@ -451,32 +417,19 @@ def call_gemini(text: str) -> dict:
                         model=model, contents=text,
                         config=types.GenerateContentConfig(**cfg),
                     )
-                    out = _extract_json(r)
-                    print(f"[진행] {model} 응답 {time.monotonic() - t0:.0f}s")
-                    return out
+                    return r.text
                 m = _legacy.GenerativeModel(model)
-                r = m.generate_content(
+                return m.generate_content(
                     text,
                     generation_config={
                         "response_mime_type": "application/json",
                         "temperature": 0.35,
                         "top_p": 0.9,
-                        "max_output_tokens": _MAX_OUT_TOKENS,
                     },
-                    request_options={"timeout": _REQ_TIMEOUT_S},
-                )
-                out = _extract_json(r)
-                print(f"[진행] {model} 응답 {time.monotonic() - t0:.0f}s")
-                return out
+                ).text
             except Exception as e:  # noqa: BLE001
                 last = e
-                msg = str(e)
-                print(f"[경고] {model} {time.monotonic() - t0:.0f}s 만에 실패")
-                # 없는 모델(404)·쿼터 0(free tier limit:0) 은 재시도해도 안 됨 → 바로 다음 모델
-                if "404" in msg or "NOT_FOUND" in msg or "limit: 0" in msg:
-                    print(f"[경고] {model}: 사용 불가(모델 없음/쿼터 0) — 다음 모델로")
-                    break
-                wait = 2 ** attempt  # 503(수요 급증)·잘림·일시 오류는 2·4s 백오프로 1회 재시도
+                wait = 2 ** attempt
                 print(f"[경고] {model} 실패: {e} → {wait}s 후 재시도")
                 time.sleep(wait)
     raise RuntimeError(f"Gemini 전체 실패: {last}")
@@ -528,6 +481,58 @@ def calculate_ewma_vol_percentile(key: str) -> float:
     less_equal_count = np.sum(recent_vol <= current_vol)
     percentile = (less_equal_count / len(recent_vol)) * 100.0
     return round(percentile, 1)
+
+
+def track_forecast_direction(commodities: dict) -> None:
+    """기존 raw_materials_forecast.json의 이전 전망 기조와 비교하여
+    예측 기조의 연속성(상승/하강 유지 또는 전환 발생) 및 연속 개수(Streak)를 계산합니다.
+    """
+    prev_data = {}
+    try:
+        if os.path.exists("raw_materials_forecast.json"):
+            with open("raw_materials_forecast.json", encoding="utf-8") as f:
+                prev_data = json.load(f).get("forecast_data") or {}
+    except Exception:  # noqa: BLE001
+        pass
+
+    for k in COMMODITIES:
+        c = commodities.get(k)
+        if not c:
+            continue
+            
+        cur_price = c.get("current_price") or 1.0
+        target_price = c.get("forecast_6m_target") or cur_price
+        
+        # 현재 전망 기조 판정 (상승 / 하강 / 보합)
+        if target_price > cur_price * 1.001:  # 0.1% 이상 상승 시 상승 기조
+            cur_stance = "상승"
+        elif target_price < cur_price * 0.999:  # 0.1% 이상 하락 시 하강 기조
+            cur_stance = "하강"
+        else:
+            cur_stance = "보합"
+
+        # 이전 데이터 조회
+        p = prev_data.get(k) or {}
+        has_prev = "direction_stance" in p
+        prev_stance = p.get("direction_stance") or "상승"
+        prev_streak = p.get("direction_streak") or 1
+        
+        # 상태 기조 변화 판정 및 Streak 업데이트
+        if not has_prev:
+            # 이전 기록이 전혀 없는 첫 실행인 경우 각 자산의 실제 계산된 기조로 1개월 시작
+            new_streak = 1
+            status_text = f"{cur_stance}방향 유지"
+        elif cur_stance == prev_stance:
+            new_streak = prev_streak + 1
+            status_text = f"{cur_stance}방향 유지"
+        else:
+            new_streak = 1
+            status_text = f"전환 발생({prev_stance}➡️{cur_stance})"
+            
+        # 신규 필드 적재
+        c["direction_stance"] = cur_stance
+        c["direction_streak"] = new_streak
+        c["direction_status"] = status_text
 
 
 def sanitize_scenarios(commodities: dict) -> None:
@@ -666,7 +671,7 @@ def clamp_vs_previous(commodities: dict, jump: float = 0.22) -> None:
 
 print("[진행] Gemini 전망 생성…")
 try:
-    parsed = call_gemini(prompt)   # dict 반환 (파싱·잘림 방어 포함, 실패 시 다음 모델로)
+    parsed = json.loads(call_gemini(prompt))
     commodities = parsed["commodities"]
     validate(commodities)
     fix_months(commodities)          # 월 라벨을 연속 6개월로 강제(순서 꼬임 방지)
@@ -674,11 +679,13 @@ try:
     clamp_vs_previous(commodities)   # 실행 간 급변만 억제(경로 모양 유지)
     sanitize_scenarios(commodities)  # 이상치·역전만 최소 보정 + target 재계산
     
-    # EWMA 변동성 백분위 산출 적용
+    # EWMA 변동성 백분위 산출 및 전망 방향성 추적 적용
     for k in COMMODITIES:
         c = commodities.get(k)
         if c:
             c["volatility_score"] = calculate_ewma_vol_percentile(k)
+            
+    track_forecast_direction(commodities)
 except Exception as e:  # noqa: BLE001
     print(f"[에러] 전망 생성/검증 실패: {e}. 기존 raw_materials_forecast.json 유지.")
     sys.exit(1)
@@ -693,6 +700,3 @@ output = {
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 print("[성공] raw_materials_forecast.json 저장 완료")
-
-# 이번 배치의 전망을 별도 파일로 동결 보관(과거 전망치 변동 추적용)
-save_snapshot(update_date, macro, commodities)
