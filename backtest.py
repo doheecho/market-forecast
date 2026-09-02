@@ -61,6 +61,8 @@ class Cfg:
         self.mr_win = a.mr_win                 # 평균회귀: 장기평균 창(개월)
         self.mom_win = a.mom_win               # 모멘텀: OLS 기울기 창(개월)
         self.mom_damping = a.mom_damping       # 모멘텀 기울기 감쇠
+        # 단계 F: 변동성 term-structure
+        self.vol_model = a.vol_model           # 'sqrt'(현행 √h) | 'garch'(GARCH(1,1) 누적)
 
     def as_dict(self) -> dict:
         return {
@@ -69,7 +71,8 @@ class Cfg:
             "vol_blend": self.vol_blend, "vol_floor": self.vol_floor,
             "min_train": self.min_train, "max_h": self.max_h,
             "mr_win": self.mr_win, "mom_win": self.mom_win,
-            "mom_damping": self.mom_damping, "quantiles": list(QUANTILES),
+            "mom_damping": self.mom_damping, "vol_model": self.vol_model,
+            "quantiles": list(QUANTILES),
         }
 
 
@@ -81,6 +84,57 @@ def _blend_sigma(train: pd.Series, cfg: Cfg) -> float:
     sl = float(lr.iloc[-cfg.vol_long:].std(ddof=1))
     ss = float(lr.iloc[-cfg.vol_short:].std(ddof=1))
     return max(cfg.vol_blend * sl + (1.0 - cfg.vol_blend) * ss, cfg.vol_floor)
+
+
+# ── 단계 F: GARCH(1,1) 변동성 term-structure ──────────────────────────
+# √h 는 "월간 분산이 일정" 가정 — 실제로는 변동성이 평균회귀·군집한다.
+# GARCH(1,1): σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}. 분산타게팅으로 ω = v̄(1-α-β)
+# 고정, (α,β)는 조립그리드에서 가우시안 로그우도 최대화(scipy 불필요).
+# h개월 누적분산(=h개월 뒤 로그가격 수준의 분산):
+#   Σ_{k=1..h} E[σ²_{t+k}] = h·v̄ + (σ²_{t+1}-v̄)·(1-(α+β)^h)/(1-(α+β))
+# → σ_h = √(누적분산).  α+β<1 이면 h 가 커질수록 선형(√h 아님)에 수렴.
+_GA = tuple(round(x, 2) for x in np.arange(0.02, 0.301, 0.03))   # α 그리드
+_GB = tuple(round(x, 2) for x in np.arange(0.60, 0.951, 0.03))   # β 그리드
+
+
+def _garch_sigma_path(lr: np.ndarray, max_h: int, floor: float) -> np.ndarray:
+    """월간 로그수익률 배열 → [σ_1..σ_max_h] (h개월 누적 로그표준편차)."""
+    r = lr - float(lr.mean())
+    n = len(r)
+    v_bar = float(np.var(lr, ddof=1))
+    fb = np.array([max(math.sqrt(v_bar), floor) * math.sqrt(h)
+                   for h in range(1, max_h + 1)])
+    if n < 24 or v_bar <= 0:
+        return fb
+    r2 = r * r
+    best = None
+    for al in _GA:
+        for be in _GB:
+            if al + be >= 0.999:
+                continue
+            om = v_bar * (1.0 - al - be)
+            s2 = v_bar
+            ll = 0.0
+            ok = True
+            for t in range(1, n):
+                s2 = om + al * r2[t - 1] + be * s2
+                if s2 <= 1e-12:
+                    ok = False
+                    break
+                ll -= 0.5 * (math.log(s2) + r2[t] / s2)
+            if ok and (best is None or ll > best[0]):
+                best = (ll, al, be, s2)
+    if best is None:
+        return fb
+    _, al, be, s2_last = best
+    ab = al + be
+    s2_next = v_bar * (1.0 - ab) + al * r2[-1] + be * s2_last     # σ²_{t+1}
+    out = []
+    for h in range(1, max_h + 1):
+        geo = h if abs(1.0 - ab) < 1e-9 else (1.0 - ab ** h) / (1.0 - ab)
+        cum = h * v_bar + (s2_next - v_bar) * geo
+        out.append(math.sqrt(max(cum, (floor ** 2) * h)))
+    return np.array(out)
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -113,20 +167,24 @@ def _q_from_lognormal(mu: float, sigma: float) -> dict[float, float]:
 
 
 def f_stat(train: pd.Series, cfg: Cfg) -> dict[int, dict]:
-    """analyze.py calculate_statistical_bounds 재현: 감쇠 드리프트 + √h 변동성."""
+    """analyze.py calculate_statistical_bounds 재현: 감쇠 드리프트 + 변동성 term-structure.
+    vol_model='sqrt' = σ_1·√h (현행). 'garch' = GARCH(1,1) h개월 누적."""
     p_t = float(train.iloc[-1])
     lr = np.log(train / train.shift(1)).dropna()
     if len(lr) < 6:
         return {}
     sig_long = float(lr.iloc[-cfg.vol_long:].std(ddof=1))
     sig_short = float(lr.iloc[-cfg.vol_short:].std(ddof=1))
-    sigma = cfg.vol_blend * sig_long + (1.0 - cfg.vol_blend) * sig_short
-    sigma = max(sigma, cfg.vol_floor)
+    sigma = max(cfg.vol_blend * sig_long + (1.0 - cfg.vol_blend) * sig_short, cfg.vol_floor)
     drift = float(lr.iloc[-cfg.drift_win:].mean()) * cfg.drift_damping
+    if cfg.vol_model == "garch":
+        sig_h = _garch_sigma_path(lr.to_numpy(), cfg.max_h, cfg.vol_floor)
+    else:
+        sig_h = np.array([sigma * math.sqrt(h) for h in range(1, cfg.max_h + 1)])
     out = {}
     for h in cfg.horizons:
         mu = math.log(p_t) + drift * h
-        sh = sigma * math.sqrt(h)
+        sh = float(sig_h[h - 1])
         out[h] = {"median": math.exp(mu), "q": _q_from_lognormal(mu, sh),
                   "mu": mu, "sigma": sh}
     return out
@@ -678,6 +736,10 @@ def main() -> None:
     ap.add_argument("--vol-floor", type=float, default=0.015)
     ap.add_argument("--min-train", type=int, default=36)
     ap.add_argument("--max-h", type=int, default=6)
+    ap.add_argument("--vol-model", choices=("sqrt", "garch"), default="sqrt",
+                    help="단계 F: 밴드 변동성 term-structure. sqrt=σ_1·√h(현행), garch=GARCH(1,1) 누적")
+    ap.add_argument("--compare-garch", action="store_true",
+                    help="단계 F: sqrt vs garch 를 한 번에 비교(+calibration)")
     ap.add_argument("--no-csv", action="store_true", help="records.csv 미출력")
     ap.add_argument("--calibrate", action="store_true",
                     help="단계 C: 롤링 OOS split-conformal 재캘리브레이션 결과도 산출·비교")
@@ -804,6 +866,31 @@ def main() -> None:
         results["ensemble_emitted"] = ens
         print("[생성] ensemble.json (production 가중치)")
 
+    # ── 단계 F: sqrt vs garch 변동성 term-structure (항상 둘 다 새로 돌림) ──
+    garch_cmp = None
+    if a.compare_garch:
+        scfg, gcfg = Cfg(a), Cfg(a)
+        scfg.vol_model, gcfg.vol_model = "sqrt", "garch"
+        srecs = recs if cfg.vol_model == "sqrt" else run(monthly, scfg)
+        grecs = recs if cfg.vol_model == "garch" else run(monthly, gcfg)
+        _cal_w = a.cal_warmup
+        rows_by = {
+            "sqrt": srecs,
+            "sqrt +C": calibrate_rolling(srecs, _cal_w, "model"),
+            "garch": grecs,
+            "garch +C": calibrate_rolling(grecs, _cal_w, "model"),
+        }
+        garch_cmp = {}
+        for name, rr in rows_by.items():
+            bh = {}
+            for r in rr:
+                bh.setdefault(r["horizon"], []).append(r)
+            garch_cmp[name] = {
+                "overall": _agg(rr, with_dm=cfg.max_h),
+                "by_horizon": {str(h): _agg(bh[h]) for h in sorted(bh)},
+            }
+        results["garch_run"] = garch_cmp
+
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(f"{OUT_DIR}/results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
@@ -837,6 +924,15 @@ def main() -> None:
         print("  ── 단계 D: 앙상블 (C 밴드 위) ──")
         for name, v in ens_cmp.items():
             _line(name, v["overall"])
+    if garch_cmp is not None:
+        print("  ── 단계 F: 변동성 term-structure ──")
+        for name, v in garch_cmp.items():
+            _line(name, v["overall"])
+        for h in sorted(by_h):
+            sc = garch_cmp["sqrt +C"]["by_horizon"].get(str(h), {})
+            gc = garch_cmp["garch +C"]["by_horizon"].get(str(h), {})
+            print(f"     h={h}: cov80 sqrt+C={_s(sc.get('cov80'))} garch+C={_s(gc.get('cov80'))}"
+                  f"  pinball sqrt+C={_s(sc.get('pinball_pct'))} garch+C={_s(gc.get('pinball_pct'))}")
     print(f"  → {OUT_DIR}/results.json" + ("" if a.no_csv else f" · {OUT_DIR}/records.csv"))
     for h in sorted(by_h):
         ah = results["by_horizon"][str(h)]
@@ -978,6 +1074,37 @@ if __name__ == "__main__":
 #     쪽(공통인자·GARCH)에 집중.
 #   · 참고로 --drift-damping 0 (= 중심선을 순수 naive 로) 이 현행 0.2 보다
 #     OOS MAE 가 0.17%p 낮다. 효과는 작지만 방향은 "드리프트를 더 줄여라".
+#
+# [단계 F — GARCH(1,1) 변동성 term-structure (--vol-model garch / --compare-garch) → 채택]
+#   · 왜: √h 는 "월간 분산이 매달 같다"(독립증분) 가정. 실제 변동성은
+#     평균회귀·군집한다. 최근이 조용하면 √h 는 근월을 과대추정, 급등락 직후엔
+#     즉각 못 넓힌다. 단계 C 는 이걸 사후 경험분위로 '땜질' 했을 뿐.
+#   · 방법: GARCH(1,1) σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}. 분산타게팅으로
+#     ω = v̄(1-α-β) 고정, (α,β) 는 α∈[.02,.29]·β∈[.60,.93] 조립그리드에서
+#     가우시안 로그우도 최대(scipy 불필요). h개월 뒤 로그가격 수준의 분산 =
+#     Σ_{k=1..h} E[σ²_{t+k}] = h·v̄ + (σ²_{t+1}-v̄)·(1-(α+β)^h)/(1-(α+β)).
+#     α+β<1 이면 h 증가 시 √h 가 아니라 분산이 선형(장기 v̄ 기울기)에 수렴.
+#     데이터<24개월·GARCH 실패 시 √h 로 폴백.
+#   · 결과(5,622건, C 위):
+#       sqrt      pinball 4.038  cov80 .755  skill_vs_naive -0.003
+#       sqrt +C   pinball 4.104  cov80 .789  skill -0.019
+#       garch     pinball 3.951  cov80 .765  skill +0.019
+#       garch +C  pinball 4.007  cov80 .798  skill +0.005   ← 채택
+#     garch+C 는 (a) pinball 이 전 horizon sqrt+C 보다 낮고, 원래 baseline
+#     (4.038) 도 밑돈다 = 단계 C 의 pinball 비용을 회수, (b) cov80 이 .80 에
+#     정확히 도달·평탄, (c) **DM* = -2.554, p = 0.011 로 나이브 대비 스킬이
+#     통계적으로 유의**(이 전 과정 통틀어 처음). MAE 는 불변(밴드만 건드림).
+#   · 게이트: 통과. 단계 C 와 달리 트레이드오프 없이 개선.
+#   · 기전: GARCH 는 "지금" 의 조건부 분산을 쓴다 — 조용한 달엔 근월 밴드가
+#     √h·롤링블렌드보다 타이트해 pinball 이 낮고, 변동성 급증 시엔 즉시 넓혀
+#     tail 을 잡는다. shape 변화보다 "반응성 있는 σ_1" 의 기여가 크다.
+#   · production: analyze.calculate_statistical_bounds 가 36/6m 블렌드 대신
+#     _common.garch_sigma_path(월간 로그수익률, months_ahead, floor) 사용.
+#     calibration.json 은 반드시 --vol-model garch 로 재생성해야 잔차 기준이
+#     맞는다: python backtest.py --vol-model garch --emit-calibration.
+#   · 한계: 월 12종 각각 독립 GARCH(공통 변동성 팩터 무시 = 단계 E). 그리드
+#     추정이라 MLE 최적점은 아님(스킬 차이엔 영향 미미). 정규분포 조건부
+#     가정(팩테일은 C 의 conformal 이 흡수).
 #
 # [알려진 한계 / 다음 단계에서 다룰 것]
 #   · expanding window 라 초기 시점은 훈련량이 적다(min_train=36 로 하한).

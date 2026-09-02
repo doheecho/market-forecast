@@ -12,8 +12,10 @@
 [base(중심 전망) — analyze.py, conservative_forecast / sanitize_scenarios]
   · 통계 중심선: 최근 12개월(_DRIFT_WINDOW) 평균 로그수익률(드리프트)의 20%
     (_DRIFT_DAMPING)만 반영 — 추세를 그대로 미래로 외삽하는 과신 방지.
-  · 밴드(bull/bear 끝점): 최근 36개월(_VOL_WINDOW) 로그수익률 표준편차(σ)를
-    랜덤워크 √t 스케일링, z=1.28(_BAND_Z, 약 80% 구간)로 t개월 뒤 밴드 계산.
+  · 밴드(bull/bear 끝점): 변동성 term-structure = GARCH(1,1) h개월 누적
+    (단계 F, garch_sigma_path — √t 대체). 분위계수는 정규 ±1.2816 이 기본이나
+    calibration.json(단계 C, split-conformal 실측 잔차분위)이 있으면 horizon별
+    (z_lo, z_hi)로 대체 — 팩테일·상하방 비대칭. 근거는 backtest.py 참고.
     이 끝점은 AI 가 못 건드리는 순수 통계값.
   · base 의 최종 위치: 위 밴드(bear~bull) 안에서 AI 가 서술한 방향성 비대칭
     (bull/bear bias 상대 비율)만큼 가중 이동. 가중치 _AI_TILT_WEIGHT=0.5로
@@ -301,6 +303,58 @@ def today_str() -> str:
 # 파일이 없으면 {} → 호출측이 정규계수로 항등 처리(=기존 동작).
 CALIBRATION_FILE = "calibration.json"
 PHI_LO, PHI_HI = -1.2816, 1.2816   # Φ⁻¹(0.10), Φ⁻¹(0.90)
+
+
+def garch_sigma_path(lr, max_h: int, floor: float):
+    """단계 F: 월간 로그수익률 → [σ_1..σ_max_h] (h개월 누적 로그표준편차).
+
+    √h(월간분산 일정 가정) 대신 GARCH(1,1) σ²_t = ω + α·ε²_{t-1} + β·σ²_{t-1}.
+    분산타게팅으로 ω=v̄(1-α-β) 고정, (α,β)는 조립그리드에서 가우시안 LL 최대화
+    (scipy 불필요). h개월 누적분산 = h·v̄ + (σ²_{t+1}-v̄)·(1-(α+β)^h)/(1-(α+β)).
+    데이터<24개월이면 √h 로 폴백. **backtest.py _garch_sigma_path 와 동일 구현 —
+    한쪽 고치면 양쪽.**
+    """
+    import numpy as _np
+
+    lr = _np.asarray(lr, dtype=float)
+    lr = lr[_np.isfinite(lr)]
+    n = len(lr)
+    v_bar = float(_np.var(lr, ddof=1)) if n > 1 else 0.0
+    fb = _np.array([max(v_bar ** 0.5, floor) * (h ** 0.5) for h in range(1, max_h + 1)])
+    if n < 24 or v_bar <= 0:
+        return fb
+    r = lr - float(lr.mean())
+    r2 = r * r
+    grid_a = [round(0.02 + 0.03 * i, 2) for i in range(10)]      # 0.02..0.29
+    grid_b = [round(0.60 + 0.03 * i, 2) for i in range(12)]      # 0.60..0.93
+    best = None
+    for al in grid_a:
+        for be in grid_b:
+            if al + be >= 0.999:
+                continue
+            om = v_bar * (1.0 - al - be)
+            s2 = v_bar
+            ll = 0.0
+            ok = True
+            for t in range(1, n):
+                s2 = om + al * r2[t - 1] + be * s2
+                if s2 <= 1e-12:
+                    ok = False
+                    break
+                ll -= 0.5 * (float(_np.log(s2)) + r2[t] / s2)
+            if ok and (best is None or ll > best[0]):
+                best = (ll, al, be, s2)
+    if best is None:
+        return fb
+    _, al, be, s2_last = best
+    ab = al + be
+    s2_next = v_bar * (1.0 - ab) + al * r2[-1] + be * s2_last
+    out = []
+    for h in range(1, max_h + 1):
+        geo = h if abs(1.0 - ab) < 1e-9 else (1.0 - ab ** h) / (1.0 - ab)
+        cum = h * v_bar + (s2_next - v_bar) * geo
+        out.append(max(cum, (floor ** 2) * h) ** 0.5)
+    return _np.array(out)
 
 
 def load_calibration(path: str = CALIBRATION_FILE) -> dict[int, tuple[float, float]]:

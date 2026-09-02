@@ -108,4 +108,27 @@ python backtest.py --emit-ensemble     # ensemble.json (미커밋 — 분석용)
 - 부수 발견: `--drift-damping 0`(중심선을 순수 naive 로)이 현행 0.2보다 OOS
   MAE 0.17%p 낮음. 작지만 "드리프트를 더 줄여라" 방향.
 
+## 단계 F — GARCH(1,1) 변동성 term-structure → 채택
+
+```bash
+python backtest.py --compare-garch                          # sqrt vs garch (+C)
+python backtest.py --vol-model garch --emit-calibration     # garch 기준 calibration.json
+```
+
+√h(월간분산 일정 가정) 대신 GARCH(1,1) h개월 누적분산. 분산타게팅 + 조립그리드
+로그우도(scipy 불필요). α+β<1 이면 분산이 √h 가 아니라 선형에 수렴.
+
+| (C 위, 5,622건) | pinball% | cov80 | skill vs naive | DM p |
+|---|---|---|---|---|
+| sqrt +C | 4.104 | 0.789 | −0.019 | — |
+| **garch +C** | **4.007** | **0.798** | **+0.005** | **0.011** |
+
+- garch+C pinball 이 전 horizon sqrt+C 보다 낮고 **원래 baseline(4.038)도 밑돔**
+  = 단계 C 의 pinball 비용 회수. cov80 이 .80 에 정확히 도달·평탄.
+- **DM* = −2.554, p = 0.011** — 나이브 대비 스킬이 통계적으로 유의(전 과정 처음).
+- MAE 불변(밴드만). 기전: "지금" 의 조건부 분산 → 조용한 달엔 타이트,
+  급등 시 즉시 확대. shape 보다 "반응성 있는 σ_1" 기여.
+- production: `analyze.calculate_statistical_bounds` 가 36/6m 블렌드 → GARCH.
+  `calibration.json` 은 `--vol-model garch` 로 재생성해야 잔차 기준이 맞음.
+
 앞으로 어떤 변경도 `results.json` 의 pinball/커버리지가 여기서 더 나빠지면 채택 안 함.

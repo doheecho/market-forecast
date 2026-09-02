@@ -16,8 +16,8 @@ import numpy as np
 import pandas as pd
 
 from _common import (
-    COMMODITIES, META, PHI_HI, PHI_LO, build_history, fetch_raw, latest_macro,
-    load_calibration, load_manual_history, save_snapshot, today_str,
+    COMMODITIES, META, PHI_HI, PHI_LO, build_history, fetch_raw, garch_sigma_path,
+    latest_macro, load_calibration, load_manual_history, save_snapshot, today_str,
 )
 
 # 단계 C: 통계 밴드 분위계수. calibration.json 있으면 horizon별 (z_lo, z_hi),
@@ -202,10 +202,11 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
 
 
 def calculate_statistical_bounds(key: str, months_ahead: int = 6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """자산의 역사적 데이터로 로그수익률의 Drift·Volatility 를 산출하고, Geometric
-    Random Walk 가정 하 80% 밴드를 √t 스케일로 계산합니다. 분위계수는 정규 ±1.2816
-    이 기본이나, calibration.json(단계 C, split-conformal)이 있으면 horizon별
-    실측 잔차분위(z_lo, z_hi)로 대체 — 팩테일·상하방 비대칭 반영. base 는 불변.
+    """중심선 = 감쇠 드리프트(랜덤워크에 가깝게), 밴드 = 변동성 term-structure ×
+    분위계수. 변동성은 GARCH(1,1) h개월 누적(단계 F, garch_sigma_path). 분위계수는
+    정규 ±1.2816 이 기본이나 calibration.json(단계 C, split-conformal)이 있으면
+    horizon별 실측 잔차분위(z_lo, z_hi)로 대체 — 팩테일·상하방 비대칭 반영.
+    base(중앙값)는 불변. 근거·백테스트는 backtest.py 및 그 하단 가정 블록 참고.
     """
     m_raw, mult = _monthly_series(key)
     spot_price = spot.get(key)
@@ -224,39 +225,27 @@ def calculate_statistical_bounds(key: str, months_ahead: int = 6) -> tuple[np.nd
     if not spot_price:
         spot_price = m.iloc[-1]
 
-    # 최근 36개월의 월별 로그수익률 계산 (장기 변동성)
-    m_recent = m.iloc[-36:] if len(m) > 36 else m
-    log_returns = np.log(m_recent / m_recent.shift(1)).dropna()
-
-    # 최근 12개월의 평균 로그수익률 (Drift)
+    # 드리프트: 최근 12개월 평균 로그수익률의 20%만 반영(추세 과신 억제)
     m_12 = m.iloc[-12:] if len(m) > 12 else m
     log_returns_12 = np.log(m_12 / m_12.shift(1)).dropna()
-    
-    # 12개월 평균 로그수익률의 20% Damping 적용 (Drift 제어)
     drift = log_returns_12.mean() * 0.20 if len(log_returns_12) > 0 else 0.0
 
-    # 36개월 로그수익률의 표준편차 (장기 월간 변동성)
-    vol_36 = log_returns.std() if len(log_returns) > 0 else 0.05
-    
-    # 최근 6개월 로그수익률의 표준편차 (단기 월간 변동성)
-    m_6 = m.iloc[-6:] if len(m) > 6 else m
-    log_returns_6 = np.log(m_6 / m_6.shift(1)).dropna()
-    vol_6 = log_returns_6.std() if len(log_returns_6) > 0 else vol_36
-    
-    # 장기와 단기 변동성을 50:50으로 혼합하여 최근 급등락 시 즉각적으로 밴드가 팽창하도록 반영 (EMA/가중치 혼합 효과)
-    vol = 0.5 * vol_36 + 0.5 * vol_6
-    # 최하 변동성 하한 1.5% 부여
-    vol = max(vol, 0.015)
-    
+    # 단계 F: 밴드 변동성 term-structure = GARCH(1,1) h개월 누적. √h(월간분산
+    # 일정 가정)는 최근 국면에 둔감하고 장기 커버리지가 무너진다(백테스트로
+    # 확인 — garch+C 가 sqrt+C 대비 pinball·커버리지·나이브대비스킬 모두 개선).
+    # 데이터 부족·GARCH 실패 시 helper 가 √h(하한 1.5%)로 폴백.
+    m_lr = np.log(m / m.shift(1)).dropna().to_numpy()
+    sig_h = garch_sigma_path(m_lr, months_ahead, 0.015)
+
     base_path = np.zeros(months_ahead)
     bull_path = np.zeros(months_ahead)
     bear_path = np.zeros(months_ahead)
 
-    # Random Walk √t 스케일링. 분위계수는 calibration.json(단계 C) 있으면 horizon별
-    # 실측치, 없으면 정규 ±1.2816. base(중앙값)는 항상 모델값 그대로.
+    # 분위계수는 calibration.json(단계 C) 있으면 horizon별 실측치, 없으면 정규
+    # ±1.2816. base(중앙값)는 항상 모델값 그대로.
     for t in range(1, months_ahead + 1):
         mean_log = np.log(spot_price) + drift * t
-        sigma_t = vol * np.sqrt(t)
+        sigma_t = float(sig_h[t - 1])
         z_lo, z_hi = CALIB.get(t, (PHI_LO, PHI_HI))
 
         base_path[t - 1] = np.exp(mean_log)
@@ -593,11 +582,11 @@ def track_forecast_direction(commodities: dict) -> None:
 
 def sanitize_scenarios(commodities: dict) -> None:
     """통계와 AI 의 하이브리드 예측 결합 모델(Forecast Combination)을 실행합니다.
-    1. 각 원자재별 최근 36개월 역사적 변동성(Volatility)과 12개월 로그수익률 추세(Drift)를 산출.
-    2. Geometric Random Walk 하에서 80% 신뢰 수준(Z=1.28)의 통계적 밴드(bull/bear)를 √t 스케일링으로 생성.
-    3. AI 가 제시한 base 가격과 통계적 base 가격을 50:50으로 블렌딩 (가중치 0.5).
-    4. 블렌딩된 base 가 통계적 bull/bear 밴드를 이탈하지 않도록 클리핑.
-    5. 최종 bull/bear 끝점은 순수 통계값(최종 밴드)으로 고정하여 자산 고유의 변동성을 완벽히 반영.
+    1. calculate_statistical_bounds 로 통계적 base/bull/bear 산출
+       (드리프트 12개월×0.2, 변동성 GARCH(1,1) 누적[단계 F], 분위계수 calibration.json[단계 C]).
+    2. AI 가 제시한 base 가격과 통계적 base 가격을 50:50으로 블렌딩 (가중치 0.5).
+    3. 블렌딩된 base 가 통계적 bull/bear 밴드를 이탈하지 않도록 클리핑.
+    4. 최종 bull/bear 끝점은 순수 통계값(최종 밴드)으로 고정하여 자산 고유의 변동성을 반영.
     """
     for k in COMMODITIES:
         c = commodities.get(k)
