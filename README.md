@@ -8,8 +8,10 @@ WTI·전기동·알루미늄·금·은·백금·열연강판·철광석·니켈�
   **야후 파이낸스로 폴백**합니다. (자세히는 아래 "시세 CSV" 참고)
 - **갱신 주기**: **AI 전망은 주 1회(월요일)** 만 돌립니다. CSV 를 고쳐도 전망은 다시
   돌지 않고 **시세만** 반영됩니다. 매크로·`steel` 시세는 평일 매일 갱신됩니다.
-- **전망 스냅샷**: 배치가 돌 때마다 그날 전망을 `snapshots/forecast/<날짜>.json` 으로
-  동결 보관합니다 — 과거에 전망했던 수치가 이후에 얼마나 바뀌었는지 추적용.
+- **전망 이력·정확도**: 매주 월요일 배치마다 그날 전망을 `snapshots/forecast/<날짜>.json`
+  으로 동결 보관하고, 이미 지나간 예측월을 실제가와 대조해 `snapshots/accuracy.json`
+  (품목별·기간별 MAE·편향·밴드적중률, '현재가 유지' 나이브 대비)을 누적합니다.
+  시각은 KST `YYYY-MM-DD HH:MM`. 목적: 과거 전망의 정확도를 계량화해 이후 전망에 반영.
 
 ## 구성
 
@@ -20,8 +22,9 @@ WTI·전기동·알루미늄·금·은·백금·열연강판·철광석·니켈�
 | `prices.py` | **시세만** 갱신 (Gemini 미사용) — `history_3y`·`macro`·`prices_date` 교체 |
 | `analyze.py` | 시세 + Gemini → 6개월 전망(`forecast_data`) 생성 + 전망 스냅샷 저장 |
 | `raw_materials_forecast.json` | 대시보드가 읽는 단일 데이터 파일 (Actions 자동 갱신) |
-| `snapshots/forecast/*.json` | 배치별 전망 동결본 (월별 base/bull/bear·타겟·변화율만) |
+| `snapshots/forecast/*.json` | 배치별 전망 동결본 (KST 시각 + 월별 base/bull/bear·타겟·변화율) |
 | `snapshots/index.json` | 전 스냅샷의 6개월 타겟·현재가·변화율 요약 (변동 추적·차트용) |
+| `snapshots/accuracy.json` | 지나간 예측월 vs 실제가 원장 + 집계(MAE·편향·밴드적중·나이브대비) |
 | `index.html` + `dashboard.js` | 정적 대시보드 (다크 테마) |
 | `.github/workflows/prices.yml` | 평일 06:30 KST + `manual/**` push 시 시세 갱신 |
 | `.github/workflows/run.yml` | **월요일 07:00 KST 만** AI 전망 생성 (+ 수동 실행) |

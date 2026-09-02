@@ -17,7 +17,7 @@ import pandas as pd
 
 from _common import (
     COMMODITIES, META, build_history, fetch_raw, latest_macro,
-    load_manual_history, today_str,
+    load_manual_history, save_snapshot, today_str,
 )
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -754,3 +754,6 @@ output = {
 with open("raw_materials_forecast.json", "w", encoding="utf-8") as f:
     json.dump(output, f, ensure_ascii=False, indent=2)
 print("[성공] raw_materials_forecast.json 저장 완료")
+
+# 이번 배치 전망을 이력으로 동결 보관 + 지나간 예측월을 실제가와 대조(정확도 원장)
+save_snapshot(update_date, macro, commodities, history)

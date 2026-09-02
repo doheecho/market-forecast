@@ -33,7 +33,7 @@ import glob
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import yfinance as yf
@@ -295,11 +295,16 @@ def today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
-# ── 전망 스냅샷 (과거 전망치 변동 추적) ──────────────────────────────────
-# analyze.py 가 매 배치(주 1회)마다 그날 전망을 아래 경로에 '동결' 보관한다.
-# 나중에 "예전에 전망했던 수치가 이후 배치에서 얼마나 바뀌었나"를 비교하기 위함.
-SNAP_DIR = "snapshots/forecast"      # 배치 1회 = 파일 1개 (snapshots/forecast/YYYY-MM-DD.json)
-SNAP_INDEX = "snapshots/index.json"  # 전 스냅샷의 6개월 타겟·현재가·변화율 요약
+# ── 전망 이력 & 정확도 (과거 예측 vs 실제) ─────────────────────────────
+# analyze.py 가 매 배치(주 1회 월요일)마다 그날 전망을 '동결' 보관하고,
+# 이미 지나간 예측월은 실제가와 대조해 오차를 누적 기록한다.
+# 목적: 과거 전망의 정확도(품목별·기간별 MAE·편향·밴드적중률, 나이브 대비)를
+#       계량화해서 앞으로의 전망에 어떻게 반영할지 판단.
+SNAP_DIR = "snapshots/forecast"         # 배치 1회 = 파일 1개 (snapshots/forecast/YYYY-MM-DD.json)
+SNAP_INDEX = "snapshots/index.json"     # 전 스냅샷의 6개월 타겟·현재가·변화율 요약
+SNAP_ACCURACY = "snapshots/accuracy.json"  # 지나간 예측월 × 실제가 대조 원장 + 집계
+
+_KST = timezone(timedelta(hours=9))     # 배치는 월요일 07:00 KST — 이력은 KST 로 기록
 
 # 스냅샷에 담을 스칼라 필드 (전망 '수치'만 — advisor/metrics/analogs 서술은 제외해 가볍게)
 _SNAP_FIELDS = (
@@ -309,12 +314,111 @@ _SNAP_FIELDS = (
 _SNAP_ARRAYS = ("monthly_forecast_base", "monthly_forecast_bull", "monthly_forecast_bear")
 
 
-def save_snapshot(update_date: str, macro: dict, commodities: dict) -> str:
-    """이번 배치의 전망을 snapshots/forecast/<update_date>.json 으로 보관하고
-    snapshots/index.json 을 다시 만든다. 같은 날 재실행 시 그날 파일은 덮어쓴다.
-    월별 base/bull/bear 는 month·price 만 남긴다(근거 문장 제외). 저장 경로를 반환.
+def _now_kst() -> str:
+    return datetime.now(_KST).strftime("%Y-%m-%d %H:%M")
+
+
+def _monthly_actuals(history: dict) -> dict:
+    """history_3y({key:[{date,price}]}) → {key: {'YYYY-MM': 그 달 마지막 실제가}}."""
+    out: dict[str, dict[str, float]] = {}
+    for k, rows in (history or {}).items():
+        mp: dict[str, float] = {}
+        for r in rows or []:
+            d, p = str(r.get("date") or ""), r.get("price")
+            if len(d) >= 7 and p:
+                mp[d[:7]] = float(p)   # 같은 달이면 뒤 날짜가 덮어씀 = 월말값
+        if mp:
+            out[k] = mp
+    return out
+
+
+def _mean(xs):
+    xs = [x for x in xs if x is not None]
+    return round(sum(xs) / len(xs), 2) if xs else None
+
+
+def _build_accuracy(history: dict, cur_ym: str) -> dict:
+    """모든 스냅샷 × 이미 끝난 예측월을 실제가와 대조해 원장+집계를 만든다."""
+    actuals = _monthly_actuals(history)
+    records = []
+    for p in sorted(glob.glob(f"{SNAP_DIR}/*.json")):
+        try:
+            d = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        fdate = d.get("update_date") or os.path.splitext(os.path.basename(p))[0]
+        fym = fdate[:7]
+        for k, c in (d.get("commodities") or {}).items():
+            amap = actuals.get(k) or {}
+            base = {r.get("month"): r.get("price") for r in c.get("monthly_forecast_base") or []}
+            bull = {r.get("month"): r.get("price") for r in c.get("monthly_forecast_bull") or []}
+            bear = {r.get("month"): r.get("price") for r in c.get("monthly_forecast_bear") or []}
+            anchor = c.get("current_price")
+            for ym, pb in base.items():
+                if not ym or ym >= cur_ym:      # 아직 안 끝난 달은 제외
+                    continue
+                act = amap.get(ym)
+                if not act or not pb:
+                    continue
+                lo, hi = bear.get(ym), bull.get(ym)
+                err = (act / pb - 1) * 100
+                rec = {
+                    "forecast_date": fdate,
+                    "target_month": ym,
+                    "commodity": k,
+                    "months_ahead": (int(ym[:4]) * 12 + int(ym[5:7]))
+                                    - (int(fym[:4]) * 12 + int(fym[5:7])),
+                    "predicted_base": round(float(pb), 2),
+                    "predicted_bull": round(float(hi), 2) if hi else None,
+                    "predicted_bear": round(float(lo), 2) if lo else None,
+                    "anchor_price": round(float(anchor), 2) if anchor else None,
+                    "actual": round(float(act), 2),
+                    "error_pct": round(err, 2),
+                    "abs_error_pct": round(abs(err), 2),
+                    "in_band": (lo is not None and hi is not None and lo <= act <= hi),
+                    "naive_abs_error_pct": (round(abs(act / anchor - 1) * 100, 2)
+                                            if anchor else None),
+                }
+                records.append(rec)
+
+    def agg(rows):
+        if not rows:
+            return {"n": 0}
+        return {
+            "n": len(rows),
+            "mae_pct": _mean([r["abs_error_pct"] for r in rows]),
+            "bias_pct": _mean([r["error_pct"] for r in rows]),      # +면 실제가 전망보다 높았음(과소전망)
+            "band_hit_rate": round(sum(r["in_band"] for r in rows) / len(rows), 3),
+            "naive_mae_pct": _mean([r["naive_abs_error_pct"] for r in rows]),
+        }
+
+    by_c, by_h = {}, {}
+    for r in records:
+        by_c.setdefault(r["commodity"], []).append(r)
+        by_h.setdefault(str(r["months_ahead"]), []).append(r)
+    return {
+        "updated_at": _now_kst(),
+        "note": "error_pct = (실제/전망_base - 1)*100. bias_pct>0 = 실제가 전망보다 높았음(전망이 과소). "
+                "naive = '현재가 그대로 유지' 가정 오차. model MAE < naive MAE 여야 전망이 값어치 있음.",
+        "overall": agg(records),
+        "by_commodity": {k: agg(v) for k, v in sorted(by_c.items())},
+        "by_horizon": {k: agg(v) for k, v in sorted(by_h.items(), key=lambda x: int(x[0]))},
+        "records": records,
+    }
+
+
+def save_snapshot(update_date: str, macro: dict, commodities: dict,
+                  history: dict | None = None) -> str:
+    """이번 배치 전망을 snapshots/forecast/<YYYY-MM-DD>.json 로 동결 보관하고
+    snapshots/index.json 을 재생성한다. history 를 주면 snapshots/accuracy.json
+    (지나간 예측월 vs 실제가 원장·집계)도 다시 만든다. 같은 날 재실행 시 덮어씀.
+    시각은 KST 'YYYY-MM-DD HH:MM'. 저장 경로를 반환.
     """
     os.makedirs(SNAP_DIR, exist_ok=True)
+    now = datetime.now(_KST)
+    stamp = now.strftime("%Y-%m-%d %H:%M")
+    snap_date = now.strftime("%Y-%m-%d")     # 파일명은 KST 날짜 = 사용자가 아는 '그 월요일'
+
     snap_c = {}
     for k, c in commodities.items():
         row = {f: c.get(f) for f in _SNAP_FIELDS if f in c}
@@ -324,14 +428,13 @@ def save_snapshot(update_date: str, macro: dict, commodities: dict) -> str:
                 for r in (c.get(arr) or [])
             ]
         snap_c[k] = row
-    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     snap = {
-        "captured_at": stamp,
-        "update_date": update_date,
+        "captured_at": stamp,           # KST YYYY-MM-DD HH:MM
+        "update_date": update_date,     # analyze.py 기준일(UTC) — 교차확인용
         "macro": macro,
         "commodities": snap_c,
     }
-    path = f"{SNAP_DIR}/{update_date}.json"
+    path = f"{SNAP_DIR}/{snap_date}.json"
     with open(path, "w", encoding="utf-8") as f:
         json.dump(snap, f, ensure_ascii=False, indent=2)
 
@@ -344,7 +447,7 @@ def save_snapshot(update_date: str, macro: dict, commodities: dict) -> str:
             continue
         cs = d.get("commodities", {})
         entries.append({
-            "date": d.get("update_date") or os.path.splitext(os.path.basename(p))[0],
+            "date": os.path.splitext(os.path.basename(p))[0],
             "captured_at": d.get("captured_at"),
             "file": os.path.relpath(p, "snapshots").replace(os.sep, "/"),
             "target_6m": {k: v.get("forecast_6m_target") for k, v in cs.items()},
@@ -354,5 +457,17 @@ def save_snapshot(update_date: str, macro: dict, commodities: dict) -> str:
     with open(SNAP_INDEX, "w", encoding="utf-8") as f:
         json.dump({"updated_at": stamp, "snapshots": entries}, f,
                   ensure_ascii=False, indent=2)
-    print(f"[성공] 전망 스냅샷 보관: {path} (인덱스 {len(entries)}개)")
+    print(f"[성공] 전망 스냅샷 보관: {path} (이력 {len(entries)}개)")
+
+    # 정확도 원장 (지나간 예측월이 있어야 레코드가 생김 — 초기엔 빈 배열)
+    if history is not None:
+        acc = _build_accuracy(history, now.strftime("%Y-%m"))
+        with open(SNAP_ACCURACY, "w", encoding="utf-8") as f:
+            json.dump(acc, f, ensure_ascii=False, indent=2)
+        ov = acc["overall"]
+        if ov.get("n"):
+            print(f"[성공] 정확도 원장: {ov['n']}건 · MAE {ov['mae_pct']}% "
+                  f"(나이브 {ov['naive_mae_pct']}%) · 밴드적중 {ov['band_hit_rate']}")
+        else:
+            print("[진행] 정확도 원장: 아직 끝난 예측월 없음(빈 원장)")
     return path
