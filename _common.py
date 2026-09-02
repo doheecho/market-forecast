@@ -295,6 +295,34 @@ def today_str() -> str:
     return datetime.now().strftime("%Y-%m-%d")
 
 
+# ── 단계 C: 통계 밴드 캘리브레이션 계수 ─────────────────────────────────
+# backtest.py --emit-calibration 이 만든 calibration.json 을 읽어, 통계 밴드의
+# 분위계수를 정규 ±1.2816(80%) 대신 "표준화 잔차의 실측 분위" 로 바꾼다.
+# 파일이 없으면 {} → 호출측이 정규계수로 항등 처리(=기존 동작).
+CALIBRATION_FILE = "calibration.json"
+PHI_LO, PHI_HI = -1.2816, 1.2816   # Φ⁻¹(0.10), Φ⁻¹(0.90)
+
+
+def load_calibration(path: str = CALIBRATION_FILE) -> dict[int, tuple[float, float]]:
+    """→ {horizon(int): (z_lo, z_hi)}  (bear·bull 밴드용 하방/상방 계수).
+    중앙값은 건드리지 않는다(qz_band['0.5']=0). 백테스트상 중앙값까지 옮기면
+    국면 편향을 좇아 MAE·pinball 이 악화됐기 때문(band-only 만 채택)."""
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[int, tuple[float, float]] = {}
+    for hs, v in (d.get("by_horizon") or {}).items():
+        qb = (v or {}).get("qz_band") or {}
+        try:
+            lo, hi = float(qb["0.1"]), float(qb["0.9"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if lo < 0 < hi:                    # 방향성 sanity
+            out[int(hs)] = (lo, hi)
+    return out
+
+
 # ── 전망 이력 & 정확도 (과거 예측 vs 실제) ─────────────────────────────
 # analyze.py 가 매 배치(주 1회 월요일)마다 그날 전망을 '동결' 보관하고,
 # 이미 지나간 예측월은 실제가와 대조해 오차를 누적 기록한다.

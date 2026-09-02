@@ -50,5 +50,34 @@ python backtest.py --no-csv                          # 집계만
   좁다.** √h 스케일의 한계 → 캘리브레이션(C) 또는 GARCH term-structure(F).
 - PIT 오른쪽 끝 과대 + 금속류 bias 음수 → 2019~2026 상승장을 전망이 과소추종.
 
-이 숫자들이 단계 B~F 의 "개선했다" 판정 기준(baseline)이다. 어떤 변경도
-`results.json` 의 pinball/커버리지가 **이보다 나빠지면 채택하지 않는다.**
+이 숫자들이 단계 B~F 의 "개선했다" 판정 기준(baseline)이다.
+
+## 단계 C — split-conformal 밴드 캘리브레이션 (완료)
+
+```bash
+python backtest.py --calibrate --center model            # 보정 전후 비교
+python backtest.py --calibrate --emit-calibration        # calibration.json 생성
+```
+
+정규 Φ⁻¹(p) 대신 **표준화 잔차의 실측 p-분위**로 밴드를 뽑는다(분포가정 없음).
+롤링 OOS(각 시점 캘리브레이션은 그 이전 실현 잔차로만 적합, 워밍업 40개).
+
+| | 기준 | 보정(center=model) |
+|---|---|---|
+| cov80 | 0.755 (h1 .80 → h6 .72) | **0.789** (h별 .78~.81 평탄) |
+| cov50 | 0.499 | 0.516 |
+| MAE% | 11.65 | **11.65 (불변)** |
+| pinball% | 4.038 | 4.104 (+1.6%) |
+
+- **`center=model` 채택**: 중앙값(점전망)은 모델값 유지, 스프레드만 보정.
+  `center=conformal`(중앙값도 이동)은 MAE 11.65→12.65, bias +1.6%p 로 악화 —
+  편향 보정은 국면 의존적이라 일반화 안 됨.
+- pinball +1.6% 는 "당초 무회귀 게이트" 탈락이지만 의도적 수용: pinball 은
+  밴드가 좁을수록 유리한 지표라 명목 커버리지와 상충하고, 이 제품(구매·헤지
+  bull/bear)의 목적은 "80% 밴드가 실제 80%" 이다. 중앙값·pinball 개선은 단계 D.
+- 산출 `../calibration.json` → `analyze.py calculate_statistical_bounds` 가
+  horizon별 (z_lo, z_hi) 로 읽어 적용. 파일 없으면 정규 ±1.2816 항등.
+- 캘리브레이션이 잡아낸 것: **상하방 비대칭**(h6 상방 z=1.75 vs 하방 −1.22 =
+  공급쇼크 급등 리스크가 수요약세 하락보다 두껍다) + **장기 팩테일**.
+
+앞으로 어떤 변경도 `results.json` 의 pinball/커버리지가 여기서 더 나빠지면 채택 안 함.

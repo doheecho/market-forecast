@@ -16,9 +16,16 @@ import numpy as np
 import pandas as pd
 
 from _common import (
-    COMMODITIES, META, build_history, fetch_raw, latest_macro,
-    load_manual_history, save_snapshot, today_str,
+    COMMODITIES, META, PHI_HI, PHI_LO, build_history, fetch_raw, latest_macro,
+    load_calibration, load_manual_history, save_snapshot, today_str,
 )
+
+# 단계 C: 통계 밴드 분위계수. calibration.json 있으면 horizon별 (z_lo, z_hi),
+# 없으면 정규 ±1.2816 항등. base(중앙값)는 보정 안 함 — band-only.
+CALIB = load_calibration()
+if CALIB:
+    print(f"[진행] 밴드 캘리브레이션 로드: horizon {sorted(CALIB)} "
+          f"(예: h6 z_hi={CALIB.get(6, (PHI_LO, PHI_HI))[1]:.2f} vs 정규 {PHI_HI})")
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 if not API_KEY:
@@ -195,8 +202,10 @@ def top_analogs(key: str, win: int = 12) -> list[dict]:
 
 
 def calculate_statistical_bounds(key: str, months_ahead: int = 6) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """자산의 역사적 데이터를 기반으로 로그수익률의 Drift와 Volatility를 산출하고,
-    Geometric Random Walk 가정 하에서 향후 months_ahead 개월 동안의 80% 신뢰밴드(Z=1.28)를 계산합니다.
+    """자산의 역사적 데이터로 로그수익률의 Drift·Volatility 를 산출하고, Geometric
+    Random Walk 가정 하 80% 밴드를 √t 스케일로 계산합니다. 분위계수는 정규 ±1.2816
+    이 기본이나, calibration.json(단계 C, split-conformal)이 있으면 horizon별
+    실측 잔차분위(z_lo, z_hi)로 대체 — 팩테일·상하방 비대칭 반영. base 는 불변.
     """
     m_raw, mult = _monthly_series(key)
     spot_price = spot.get(key)
@@ -242,16 +251,18 @@ def calculate_statistical_bounds(key: str, months_ahead: int = 6) -> tuple[np.nd
     base_path = np.zeros(months_ahead)
     bull_path = np.zeros(months_ahead)
     bear_path = np.zeros(months_ahead)
-    
-    # Random Walk √t 스케일링, Z=1.28 (약 80% 구간)
+
+    # Random Walk √t 스케일링. 분위계수는 calibration.json(단계 C) 있으면 horizon별
+    # 실측치, 없으면 정규 ±1.2816. base(중앙값)는 항상 모델값 그대로.
     for t in range(1, months_ahead + 1):
         mean_log = np.log(spot_price) + drift * t
-        vol_term = 1.28 * vol * np.sqrt(t)
-        
+        sigma_t = vol * np.sqrt(t)
+        z_lo, z_hi = CALIB.get(t, (PHI_LO, PHI_HI))
+
         base_path[t - 1] = np.exp(mean_log)
-        bull_path[t - 1] = np.exp(mean_log + vol_term)
-        bear_path[t - 1] = np.exp(mean_log - vol_term)
-        
+        bull_path[t - 1] = np.exp(mean_log + z_hi * sigma_t)
+        bear_path[t - 1] = np.exp(mean_log + z_lo * sigma_t)
+
     return base_path, bull_path, bear_path
 
 

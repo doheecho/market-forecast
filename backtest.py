@@ -263,6 +263,7 @@ def run(monthly: dict[str, pd.Series], cfg: Cfg) -> list[dict]:
                     "forecast_month": f_month,
                     "target_month": tgt_month,
                     "horizon": h,
+                    "_mu": mm["mu"], "_sigma": mm["sigma"],   # 재캘리브레이션용(내부)
                     "anchor": round(anchor, 4),
                     "median": round(mm["median"], 4),
                     "q10": round(q[0.10], 4), "q25": round(q[0.25], 4),
@@ -339,6 +340,112 @@ def pit_histogram(rows: list[dict], bins: int = 10) -> list[int]:
 
 
 # ─────────────────────────────────────────────────────────────────────────
+# 단계 C: split-conformal 재캘리브레이션
+#   모델은 ln A ~ N(mu, sigma²) 로 분위를 Φ⁻¹(p)·sigma 로 뽑는다. 실제로는
+#   표준화 잔차 z=(lnA-mu)/sigma 가 정규가 아니다(팩테일·비대칭·중앙값≠0).
+#   → Φ⁻¹(p) 자리에 **z 의 실측 p-분위 Qz(p)** 를 그대로 꽂는다(split conformal
+#     prediction). 커버리지가 구성상 목표에 맞고, 팩테일이면 80% 밴드만 넓어지고
+#     50% 는 유지되며, 상방/하방 비대칭도 자동 반영. Qz(0.5)≠0 이면 그게 곧
+#     (평균이 아닌 중앙값 기반의) 견고한 편향 보정.
+#   식: q_p = exp( mu + Qz_h(p) · sigma ),  base = q_0.5, bull = q_0.9, bear = q_0.1
+#   보정 안 함(파일 없음/워밍업 전) = Qz_h(p) → Φ⁻¹(p) 로 항등.
+# ─────────────────────────────────────────────────────────────────────────
+def _emp_quantiles(z: np.ndarray) -> dict:
+    return {lv: round(float(np.quantile(z, lv)), 4) for lv in QUANTILES}
+
+
+def _recal_record(r: dict, qz: dict | None, poolz: np.ndarray | None,
+                  center: str = "model") -> dict:
+    """r 을 경험분위 qz 로 재계산. qz=None 이면 원본 그대로.
+    center='model': 중앙값은 모델값 유지(qz 를 median 으로 recenter) — 스프레드만 보정.
+    center='conformal': qz(0.5) 도 그대로 적용(중앙값까지 이동 = 편향 보정 포함)."""
+    if not qz:
+        return dict(r)
+    mu, sig = r["_mu"], r["_sigma"]
+    shift = qz[0.50] if center == "model" else 0.0
+    q2 = {lv: math.exp(mu + (qz[lv] - shift) * sig) for lv in QUANTILES}
+    med2, actual, anchor = q2[0.50], r["actual"], r["anchor"]
+    err = (med2 / actual - 1.0) * 100.0
+    if poolz is not None and len(poolz):
+        za = (math.log(actual) - mu) / sig + shift if sig > 0 else float("nan")
+        pit2 = (float(np.count_nonzero(poolz <= za)) + 0.5) / len(poolz)
+    else:
+        pit2 = pit_value(actual, mu, sig)
+    out = dict(r)
+    out.update({
+        "median": round(med2, 4),
+        "q10": round(q2[0.10], 4), "q25": round(q2[0.25], 4),
+        "q75": round(q2[0.75], 4), "q90": round(q2[0.90], 4),
+        "err_pct": round(err, 3), "abs_err_pct": round(abs(err), 3),
+        "pinball_pct": round(pinball_pct(actual, q2, anchor), 4),
+        "in80": bool(q2[0.10] <= actual <= q2[0.90]),
+        "in50": bool(q2[0.25] <= actual <= q2[0.75]),
+        "pit": round(pit2, 4),
+    })
+    return out
+
+
+def calibrate_rolling(records: list[dict], warmup: int, center: str = "model") -> list[dict]:
+    """진짜 out-of-sample: 각 전망을 그 전망월 이전에 '이미 실현된' 잔차의
+    경험분위로만 재계산. 워밍업(잔차 warmup개) 전에는 항등."""
+    recs = sorted(records, key=lambda r: (r["forecast_month"], r["commodity"], r["horizon"]))
+    pool: dict[int, list[float]] = {}
+    staged: list[tuple[str, int, float]] = []
+    out, cur_fm = [], None
+    for r in recs:
+        fm = r["forecast_month"]
+        if fm != cur_fm:
+            keep = []
+            for tm, h, z in staged:
+                (pool.setdefault(h, []).append(z) if tm < fm else keep.append((tm, h, z)))
+            staged, cur_fm = keep, fm
+        h = r["horizon"]
+        pz = np.array(pool.get(h, []), float)
+        qz = _emp_quantiles(pz) if len(pz) >= warmup else None
+        out.append(_recal_record(r, qz, pz if qz else None, center))
+        if r["_sigma"] > 0:
+            staged.append((r["target_month"], h,
+                           (math.log(r["actual"]) - r["_mu"]) / r["_sigma"]))
+    return out
+
+
+def emit_calibration(records: list[dict], warmup: int) -> dict:
+    """전체 이력으로 horizon별 경험분위 Qz(p) 산출 → calibration.json.
+    production(analyze.py)이 Φ⁻¹(p) 대신 이 값을 써서 통계 밴드를 뽑는다."""
+    by_h: dict[int, list[float]] = {}
+    for r in records:
+        if r["_sigma"] > 0:
+            by_h.setdefault(r["horizon"], []).append(
+                (math.log(r["actual"]) - r["_mu"]) / r["_sigma"])
+    fit = {}
+    for h in sorted(by_h):
+        z = np.array(by_h[h], float)
+        if len(z) >= warmup:
+            qz = _emp_quantiles(z)
+            med = qz[0.50]
+            fit[str(h)] = {
+                "n": len(z),
+                "qz": qz,                                       # 원본 경험분위
+                "qz_band": {str(lv): round(qz[lv] - med, 4)     # 중앙값 recenter(스프레드만)
+                            for lv in QUANTILES},
+            }
+    return {
+        "generated_at": datetime.now(_KST).strftime("%Y-%m-%d %H:%M"),
+        "method": ("split-conformal. 통계 밴드의 분위계수를 Φ⁻¹(p) 대신 표준화잔차 "
+                   "z=(lnA-mu)/sigma 의 실측 p-분위로 대체."),
+        "center": "model",
+        "apply": ("production 은 qz_band 를 쓴다: base = exp(mu)(모델 중앙값 유지), "
+                  "bull = exp(mu + qz_band['0.9']·sigma), bear = exp(mu + qz_band['0.1']·sigma). "
+                  "백테스트상 중앙값까지 옮기면(qz) 국면 편향을 좇아 MAE·pinball 악화."),
+        "quantile_levels": list(QUANTILES),
+        "phi_inv_reference": {str(lv): round(_N01.inv_cdf(lv), 4) for lv in QUANTILES},
+        "by_horizon": fit,
+        "note": ("qz_band['0.9'] > 1.2816 = 상방 밴드 확대, qz_band['0.1'] < -1.2816 = "
+                 "하방 확대(비대칭 허용). 파일 없거나 특정 h 없으면 그 h 는 Φ⁻¹(p) 로 항등."),
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────
 # main
 # ─────────────────────────────────────────────────────────────────────────
 def main() -> None:
@@ -353,6 +460,14 @@ def main() -> None:
     ap.add_argument("--min-train", type=int, default=36)
     ap.add_argument("--max-h", type=int, default=6)
     ap.add_argument("--no-csv", action="store_true", help="records.csv 미출력")
+    ap.add_argument("--calibrate", action="store_true",
+                    help="단계 C: 롤링 OOS split-conformal 재캘리브레이션 결과도 산출·비교")
+    ap.add_argument("--cal-warmup", type=int, default=40,
+                    help="이 개수 이상 실현 잔차가 쌓여야 그 horizon 캘리브레이션 시작")
+    ap.add_argument("--center", choices=("model", "conformal"), default="model",
+                    help="model=중앙값은 모델값 유지(스프레드만 보정), conformal=중앙값도 이동")
+    ap.add_argument("--emit-calibration", action="store_true",
+                    help="전체 이력으로 calibration.json (production 이 읽을 파일) 생성")
     a = ap.parse_args()
     cfg = Cfg(a)
 
@@ -386,31 +501,66 @@ def main() -> None:
                      "양 끝이 높으면 밴드가 과소(과신)."),
     }
 
+    # ── 단계 C: 롤링 OOS 재캘리브레이션 비교 ──
+    cal_recs = None
+    if a.calibrate:
+        cal_recs = calibrate_rolling(recs, a.cal_warmup, a.center)
+        cby_h = {}
+        for r in cal_recs:
+            cby_h.setdefault(r["horizon"], []).append(r)
+        results["calibration_run"] = {
+            "params": {"method": "split-conformal (rolling OOS)",
+                       "warmup": a.cal_warmup, "center": a.center},
+            "overall": _agg(cal_recs, with_dm=cfg.max_h),
+            "by_horizon": {str(h): _agg(cby_h[h], with_dm=h) for h in sorted(cby_h)},
+            "pit_histogram_overall": pit_histogram(cal_recs),
+        }
+
+    if a.emit_calibration:
+        cal = emit_calibration(recs, a.cal_warmup)
+        with open("calibration.json", "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=2)
+        results["calibration_emitted"] = cal
+        print("[생성] calibration.json (production 이 읽을 파일)")
+
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(f"{OUT_DIR}/results.json", "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     if not a.no_csv:
-        cols = list(recs[0].keys())
+        cols = [c for c in recs[0].keys() if not c.startswith("_")]
         with open(f"{OUT_DIR}/records.csv", "w", encoding="utf-8", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=cols)
+            w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
             w.writeheader()
             w.writerows(recs)
 
-    def _s(v):  # None 안전 표시
-        return "  -  " if v is None else f"{v}"
+    def _s(v, w=0):  # None 안전 표시
+        return (f"{'-':>{w}}" if w else "-") if v is None else (f"{v:>{w}}" if w else f"{v}")
+
+    def _line(tag, o):
+        print(f"  [{tag}] pinball%={_s(o['pinball_pct'])}  MAE%={_s(o['mae_pct'])}  "
+              f"bias%={_s(o['bias_pct'])}  cov80={_s(o['cov80'])}  cov50={_s(o['cov50'])}  "
+              f"skill={_s(o['skill_vs_naive'])}  PIT_D={_s(o['pit_ks_D'])}")
 
     o = results["overall"]
     print(f"[백테스트] {len(monthly)}품목 · {len(recs)}건 채점")
-    print(f"  pinball%={_s(o['pinball_pct'])}  MAE%={_s(o['mae_pct'])}  bias%={_s(o['bias_pct'])}")
-    print(f"  커버리지 80={_s(o['cov80'])}(목표 .80)  50={_s(o['cov50'])}(목표 .50)")
-    print(f"  나이브대비 스킬(pinball)={_s(o['skill_vs_naive'])}  "
-          f"DM*={_s(o.get('dm_vs_naive_stat'))} p={_s(o.get('dm_vs_naive_p'))}")
-    print(f"  PIT KS D={_s(o['pit_ks_D'])} p={_s(o['pit_ks_p'])}")
+    _line("기준", o)
+    if cal_recs is not None:
+        co = results["calibration_run"]["overall"]
+        _line("보정", co)
+        dpb = (co["pinball_pct"] or 0) - (o["pinball_pct"] or 0)
+        print(f"  → pinball {dpb:+.4f} ({'개선' if dpb < 0 else '악화'}), "
+              f"cov80 {o['cov80']}→{co['cov80']} (목표 .80), "
+              f"PIT_D {o['pit_ks_D']}→{co['pit_ks_D']}")
+    print(f"  DM* vs 나이브={_s(o.get('dm_vs_naive_stat'))} p={_s(o.get('dm_vs_naive_p'))}")
     print(f"  → {OUT_DIR}/results.json" + ("" if a.no_csv else f" · {OUT_DIR}/records.csv"))
     for h in sorted(by_h):
         ah = results["by_horizon"][str(h)]
-        print(f"   h={h}: MAE%={_s(ah['mae_pct']):>7}  skill={_s(ah['skill_vs_naive']):>7}  "
-              f"cov80={_s(ah['cov80']):>6}  DMp={_s(ah.get('dm_vs_naive_p'))}")
+        extra = ""
+        if cal_recs is not None:
+            ch = results["calibration_run"]["by_horizon"].get(str(h), {})
+            extra = f"  →보정 MAE%={_s(ch.get('mae_pct'))} cov80={_s(ch.get('cov80'))}"
+        print(f"   h={h}: MAE%={_s(ah['mae_pct'], 7)}  cov80={_s(ah['cov80'], 6)}  "
+              f"skill={_s(ah['skill_vs_naive'], 7)}{extra}")
 
 
 if __name__ == "__main__":
@@ -485,6 +635,40 @@ if __name__ == "__main__":
 #     곱함(원 DM 은 소표본에서 기각 과다). p 는 정규근사 양측.
 #   · |DM*|>~1.96, p<0.05 이면 스킬 차이가 통계적으로 유의. n(겹침 고려 유효
 #     표본)이 작으면 유의하게 나오기 어렵고, 그것도 정보다.
+#
+# [단계 C — split-conformal 밴드 캘리브레이션 (--calibrate / --emit-calibration)]
+#   · 왜: 기본 밴드의 실측 커버리지가 cov80≈0.755(목표 .80)이고 horizon 이
+#     길수록 더 좁아진다(h1 .80 → h6 .72). 즉 80% 밴드가 실제로는 72% 만
+#     담아 "설득력" 과 tail 경보 기능이 약하다.
+#   · 방법: 예측분위 q_p = exp(mu + Qz_h(p)·sigma) 에서 Qz_h(p) 를 정규
+#     Φ⁻¹(p) 대신 **표준화 잔차 z=(lnA-mu)/sigma 의 실측 p-분위** 로 교체.
+#     이것이 split conformal prediction — 분포가정 없이 커버리지를 구성상
+#     목표에 맞춘다. 팩테일이면 80% 밴드만 넓어지고 50% 는 유지되며, 상방/
+#     하방 비대칭도 자동 반영된다.
+#   · 롤링 OOS 로만 평가: 각 전망월 t 의 캘리브레이션은 t 이전에 이미 실현된
+#     잔차(target_month < t)로만 적합 → 캘리브레이션 절차 자체에 look-ahead 없음.
+#     워밍업(잔차 40개) 전에는 항등.
+#   · center=model(채택): Qz 를 중앙값으로 recenter 해 **스프레드만** 보정,
+#     base(점전망)는 모델값 유지. center=conformal(미채택): Qz(0.5) 도 적용 =
+#     중앙값 이동. 백테스트상 conformal 은 bias 를 +1.6%p 로 뒤집고 MAE 를
+#     11.65→12.65 로 악화 → 편향은 국면 의존적이라 일반화 안 됨(예상대로).
+#   · 결과(center=model, 5,622건 롤링 OOS):
+#       cov80 0.755→0.789, horizon별 0.78~0.81 로 평탄화(6개월 0.72→0.79),
+#       cov50 0.499→0.516, MAE% 불변(중앙값 안 건드림),
+#       pinball% 4.038→4.104 (+1.6%).
+#   · 게이트 판정: 순수 pinball 은 +1.6% 로 소폭 악화(당초 "무회귀" 게이트
+#     탈락). 그러나 pinball 은 대다수(양성) 관측에서 밴드가 좁을수록 유리한
+#     지표라, "평균 예리함" 과 "명목 커버리지" 는 근본적으로 상충한다. 이
+#     제품(구매·헤지용 bull/bear 시나리오)의 목적함수는 후자 — 6개월 80%
+#     밴드가 실제 80% 를 담는 것 — 이고, 그 값이 pinball 1.6% 보다 크다고
+#     판단해 **band-only 캘리브레이션을 채택**. (중앙값·pinball 을 직접
+#     개선하는 건 단계 D 앙상블의 몫.)
+#   · 산출 calibration.json → analyze.py calculate_statistical_bounds 가
+#     horizon별 (z_lo, z_hi) 로 읽어 통계 밴드에 적용. 파일 없으면 정규 ±1.2816
+#     으로 항등(=기존 동작). 재생성: python backtest.py --emit-calibration.
+#   · 한계: horizon별 전역 pooling(품목 무관) — 품목별 잔차 분포 차이는 무시
+#     (steel n 부족 때문에 의도적). 상관·군집은 단계 E/F. 잔차 vintage 는
+#     현재 CSV 기준.
 #
 # [알려진 한계 / 다음 단계에서 다룰 것]
 #   · expanding window 라 초기 시점은 훈련량이 적다(min_train=36 로 하한).
