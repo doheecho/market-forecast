@@ -744,7 +744,11 @@ function destroyCharts() {
   state.charts = {};
 }
 function currencySign(unit) {
-  return /[￠¢]/.test(unit || "") ? "¢" : "$";
+  const u = String(unit || "").toUpperCase();
+  if (u.includes("KRW") || u.includes("원")) return "₩";
+  if (u.includes("RMB") || u.includes("CNY")) return "¥";
+  if (/[￠¢]/.test(unit || "")) return "¢";
+  return "$";
 }
 function fmtNum(v) {
   const n = Number(v);
