@@ -43,14 +43,13 @@ import yfinance as yf
 TICKERS = {
     "copper": "HG=F", "aluminum": "ALI=F", "wti": "CL=F",
     "gold": "GC=F", "silver": "SI=F", "platinum": "PL=F",
-    "steel": "HRC=F", "ironore": "TIO=F",
+    "ironore": "TIO=F",
     "dxy": "DX-Y.NYB", "us10y": "^TNX", "usdcny": "CNY=X", "usdkrw": "KRW=X",
 }
 
 # 시세 소스 우선순위: manual/<key>.csv (1차) → 야후 폴백.
 # 아래는 "야후 티커가 있는" 품목일 뿐, CSV 가 있으면(merge_manual) CSV 가 이긴다.
-# 현재 실제로 야후 폴백을 타는 건 CSV 가 없는 steel 뿐.
-YF_COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum", "steel", "ironore"]
+YF_COMMODITIES = ["wti", "copper", "aluminum", "gold", "silver", "platinum", "ironore"]
 COMMODITIES = list(YF_COMMODITIES)  # 파이프라인이 참조하는 전체 목록 (CSV-only 품목은 실행 중 편입)
 
 MANUAL_DIR = "manual"  # 1차 시세 소스: manual/<key>.csv (date,price)
@@ -64,6 +63,8 @@ META = {
     "silver": ("은 (LBMA 현물)", "US￠/ozt", 100.0),  # SI=F: USD/oz → US￠/ozt (x100)
     "platinum": ("백금 (LPPM 현물)", "USD/ozt", 1.0),
     "ironore": ("철광석 (중국 칭다오항 CFR Fines 현물)", "USD/ton", 1.0),
+    # 야후에 자유 시세가 없음 — manual/<key>.csv (date,price) 로 주입하면 대시보드에 자동 표시.
+    # CSV 가격은 표기 단위 그대로 (배수 적용 안 함).
     "nickel": ("니켈 (LME 현물)", "USD/ton", 1.0),
     "zinc": ("아연 (LME 현물)", "USD/ton", 1.0),
     "tungsten": ("텅스텐 (중국 현물 Oxide WO3 99.95%)", "RMB/mt", 1.0),
