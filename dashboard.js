@@ -12,12 +12,12 @@ const JSON_RAW =
 const PROXY_BASE = ""; // 예: "https://market-forecast-proxy.<subdomain>.workers.dev"
 
 const ORDER = ["wti", "copper", "aluminum", "gold", "silver", "platinum",
-  "steel", "ironore", "nickel", "zinc", "tungsten", "silicon",
+  "ironore", "nickel", "zinc", "tungsten", "silicon",
   "hbeam", "hrc", "crc", "scrapheavya", "scrapprime", "wirerod", "sts304"];
 const LABEL = {
   wti: "WTI 원유", copper: "전기동", aluminum: "알루미늄",
   gold: "금", silver: "은", platinum: "백금",
-  steel: "열연강판", ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
+  ironore: "철광석", nickel: "니켈", zinc: "아연", tungsten: "텅스텐",
   silicon: "실리콘", hbeam: "H형강", hrc: "열연코일", crc: "냉연코일",
   scrapheavya: "고철 중량A", scrapprime: "고철 생철", wirerod: "선재", sts304: "STS 304",
 };
@@ -25,7 +25,7 @@ const LABEL = {
 const VENUE = {
   wti: "NYMEX 선물 · USD/bbl", copper: "LME 현물 · USD/ton", aluminum: "LME 현물 · USD/ton",
   gold: "LBMA 현물 · USD/ozt", silver: "LBMA 현물 · US￠/ozt", platinum: "LPPM 현물 · USD/ozt",
-  steel: "CME HRC Futures · USD/s.ton", ironore: "칭다오항 Fines 현물 · USD/ton", nickel: "LME 현물 · USD/ton", zinc: "LME 현물 · USD/ton",
+  ironore: "칭다오항 Fines 현물 · USD/ton", nickel: "LME 현물 · USD/ton", zinc: "LME 현물 · USD/ton",
   tungsten: "Oxide WO3 99.95% 중국 현물 · RMB/mt", silicon: "Ferro 75% 중국(FOB) 현물 · USD/ton",
   hbeam: "한국 1차 유통가 · KRW/ton", hrc: "MEPS 현물 · USD/ton", crc: "MEPS 현물 · USD/ton",
   scrapheavya: "한국 도매가 · KRW/ton", scrapprime: "한국 도매가 · KRW/ton",
