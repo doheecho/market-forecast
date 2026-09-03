@@ -59,5 +59,9 @@ date,price
 - 은 : US￠/ozt, LBMA 현물
 - 백금 : USD/ozt, LPPM 현물
 - WTI : USD/bbl, NYMEX Futures
-- 철광석 : USD/ton, Fines 중국 칭다오항(CFR) 현물
-- 
+- H형강 소형/중형 : KRW/ton, 한국(1차 유통가)
+- 냉연코일 : USD/ton, MEPS 현물
+- 고철 중량A : KRW/ton, 한국(도매가)
+- 고철 생철 : KRW/ton, 한국(도매가)
+- 선재 : USD/ton, MEPS 현물
+- STS 304 : KRW/ton, CR 2mm 한국(도매가)
