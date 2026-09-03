@@ -71,13 +71,13 @@ META = {
     "zinc": ("아연 (LME 현물)", "USD/ton", 1.0),
     "tungsten": ("텅스텐 (중국 현물 Oxide WO3 99.95%)", "RMB/mt", 1.0),
     "silicon": ("실리콘 (중국 FOB Ferro 75% 현물)", "USD/ton", 1.0),
-    "H형강소형중형" : ("H형강 소형/중형 (한국 1차 유통가)", "KRW/ton", 1.0),
-    "냉연코일" : ("냉연코일 (MEPS 현물)", "USD/ton", 1.0),
-    "고철중량A" : ("고철 중량A (한국 도매가)", "KRW/ton", 1.0),
-    "고철생철" : ("고철 생철 (한국 도매가)", "KRW/ton", 1.0),
-    "선재" : ("선재 (MEPS 현물)", "USD/ton", 1.0),
-    "STS304" : ("STS 304 CR 2mm (한국 도매가)", "KRW/ton", 1.0),
-    "열연코일" : ("열연코일 (MEPS 현물)", "USD/ton", 1.0),
+    "hbeam" : ("H형강 소형/중형 (한국 1차 유통가)", "KRW/ton", 1.0),
+    "crc" : ("냉연코일 (MEPS 현물)", "USD/ton", 1.0),
+    "scrapheavya" : ("고철 중량A (한국 도매가)", "KRW/ton", 1.0),
+    "scrapprime" : ("고철 생철 (한국 도매가)", "KRW/ton", 1.0),
+    "wirerod" : ("선재 (MEPS 현물)", "USD/ton", 1.0),
+    "sts304" : ("STS 304 CR 2mm (한국 도매가)", "KRW/ton", 1.0),
+    "hrc" : ("열연코일 (MEPS 현물)", "USD/ton", 1.0),
 }
 
 _DATE_HINTS = ("date", "일자", "기준", "dt", "ymd", "날짜", "거래일", "월")
