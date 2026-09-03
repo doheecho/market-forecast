@@ -302,9 +302,11 @@ FACTORS = {
     "silicon": "매크로: 중국 제조업 PMI, 글로벌 철강 수요 (합금철 원료), 석탄 및 전력 단가 (제조 에너지 비용), 달러·위안화. "
                "마이크로: Ferro Silicon (FeSi 75%) 중국 생산량 및 가동률, 중국 수출 관세 정책, 주요 철강 제련소(포스코 등) 계약단가 추이, "
                "중국 FOB 선적 요율, 규석(원료) 및 전극봉 가격, 글로벌 자동차 알루미늄 다이캐스팅 수요",
-    "hbeam": "매크로: 국내 건설·토목 착공 면적, 부동산 PF 및 SOC 예산, 기준금리·건설 경기. "
+    "hbeam": (
+        "매크로: 국내 건설·토목 착공 면적, 부동산 PF 및 SOC 예산, 기준금리·건설 경기. "
         "마이크로: 국내 전기로 제강사(현대제철·동국제강) 가동률 및 판매가격 인상/할인 정책, "
-        "고철(철스크랩) 투입원가 스프레드, 수입산(중국/일본/베트남) 형강 유입량 및 유통재고",
+        "고철(철스크랩) 투입원가 스프레드, 수입산(중국/일본/베트남) 형강 유입량 및 유통재고"
+    ),
     "crc": (
         "매크로: 글로벌 자동차·가전 생산량, 중국 조강생산 및 수출세/환급 정책, 환율(달러/원, 위안화). "
         "마이크로: 열연코일(상위 원자재) 가격 변동 전가 속도, 포스코/현대제철 냉연 유통 출하가, "
@@ -325,13 +327,16 @@ FACTORS = {
         "마이크로: 빌릿(Billet) 및 슬래브 가격 추이, 주요 제선/제강사 선재 공장 가동률, "
         "중국산 저가 선재 수출 압력, CHQ(냉간압조용) 선재 스프레드"
     ),
-    "sts304": "매크로: LME 니켈 가격, 중국 300계열 스테인리스 생산량 및 재고, 글로벌 경기. "
+    "sts304": (
+        "매크로: LME 니켈 가격, 중국 300계열 스테인리스 생산량 및 재고, 글로벌 경기. "
         "마이크로: 포스코 STS 출하가 및 알로이 서차지(Alloy Surcharge) 변동, STS 스크랩 가격, "
-        "인도네시아/중국산 STS 수입재 유통 가격, 정밀 의료기기/외장재 가공 수요",
-    "hrc": "매크로: 중국 부동산·인프라 투자, 글로벌 제조업/건설 PMI, 달러·위안화, 각국 관세·반덤핑(美 232조, EU CBAM). "
-          "마이크로: 철광석·원료탄(코킹콜) 가격, 中 조강생산 통제·감산 지침, 중국 철강 수출량·수출증치세 환급, "
-          "美 중서부 HRC 스프레드, 전기로 vs 고로 가동률, 자동차·가전·조선 수요, 유통재고·리드타임, "
-          "우리회사 관점: 시스템 Frame/Bracket 및 협력사 판금 가공품(SPCC 냉연) 단가에 후행 반영",
+        "인도네시아/중국산 STS 수입재 유통 가격, 정밀 의료기기/외장재 가공 수요"
+    ),
+    "hrc": (
+        "매크로: 중국 부동산/인프라 투자, 글로벌 조강생산량 통제 지침, 철광석 및 원료탄(Coking Coal) 가격. "
+        "마이크로: 글로벌 MEPS 열연 현물가, 고로사 마진(열연-원료 스프레드), 중국 FOB 수출 오퍼가, "
+        "하위 냉연·도금강판 및 강관 제조업체 가동률"
+    )
 }
 
 SCHEMA_ONE = """{
@@ -411,7 +416,7 @@ def build_prompt(keys: list[str]) -> str:
 - 고철(스크랩): 철강 제품 가격의 가장 강력한 선행 지표이자, 협력사 가공 시 발생하는 스크랩 매각/환급 단가 정산에 직접 활용됨.
 - H형강/선재: 대형 구조물 프레임 및 볼트/너트/파스너 등 기초 체결류 단가 산정의 기준 지표임.
 - 실리콘은 Ferro Silicon 합금철 원료로, 프레임/브라켓 등 외장부품 제작에 간접 반영됨.
-- 단위: - 단위: wti USD/bbl, copper·aluminum·nickel·zinc·silicon·cold_rolled_coil·wire_rod·hot_rolled_coil USD/ton, gold·platinum USD/ozt, silver US￠/ozt, tungsten RMB/mt, ironore USD/ton, 
+- 단위: wti USD/bbl, copper·aluminum·nickel·zinc·silicon·cold_rolled_coil·wire_rod·hot_rolled_coil USD/ton, gold·platinum USD/ozt, silver US￠/ozt, tungsten RMB/mt, ironore USD/ton, 
   h_beam_small_medium·scrap_heavy_a·scrap_prime·sts304_cr_2mm KRW/ton.
 - 구리, 알루미늄, 금, 은의 경우 케이블, 히트싱크, 커넥터, 프레임 등 협력사 단가에 즉각 반영되는 품목임. 공급망 차질뉴스 (광산 파업, 제련소 이슈)에 매우 민감하게 반응하도록 
   가중치를 더 부여할 필요가 있고, 단기 급등시 선제 구매를 통한 헷징의 필요성이 있음
@@ -625,6 +630,10 @@ def sanitize_scenarios(commodities: dict) -> None:
         c = commodities.get(k)
         if not c:
             continue
+            
+        # 사용자 정의 명칭/단위 강제 동기화 (Gemini의 임의적 한글/영문 이름 변경 방지)
+        c["name"] = META[k][0]
+        c["unit"] = META[k][1]
             
         base_ai = c.get("monthly_forecast_base") or []
         bull_ai = c.get("monthly_forecast_bull") or []
