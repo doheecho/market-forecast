@@ -1,11 +1,11 @@
 {
   "update_date": "2026-09-07",
-  "prices_date": "2026-09-10",
+  "prices_date": "2026-09-11",
   "macro": {
-    "dxy": 99.09,
-    "us10y": 4.944,
-    "usdcny": 6.7105,
-    "usdkrw": 1349.1
+    "dxy": 99.095,
+    "us10y": 4.975,
+    "usdcny": 6.6974,
+    "usdkrw": 1341.05
   },
   "history_3y": {
     "wti": [
