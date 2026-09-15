@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-08 08:53",
+  "updated_at": "2026-09-15 09:07",
   "snapshots": [
     {
       "date": "2026-09-02",
@@ -174,6 +174,71 @@
         "scrapprime": "-1.7%",
         "sts304": "+2.7%",
         "tungsten": "+4.3%",
+        "wirerod": "-0.5%",
+        "zinc": "+2.5%"
+      }
+    },
+    {
+      "date": "2026-09-15",
+      "captured_at": "2026-09-15 09:07",
+      "file": "forecast/2026-09-15.json",
+      "target_6m": {
+        "wti": 86.61,
+        "copper": 15054.2,
+        "aluminum": 3193.54,
+        "gold": 4662.22,
+        "silver": 7347.63,
+        "platinum": 1878.85,
+        "ironore": 100.54,
+        "silicon": 1292.22,
+        "crc": 1008.23,
+        "hbeam": 1206939.65,
+        "hrc": 1030.73,
+        "nickel": 17227.93,
+        "scrapheavya": 365554.15,
+        "scrapprime": 415553.06,
+        "sts304": 4648563.06,
+        "tungsten": 715668.12,
+        "wirerod": 816.65,
+        "zinc": 3961.22
+      },
+      "current": {
+        "wti": 85.76,
+        "copper": 14535.0,
+        "aluminum": 3222.0,
+        "gold": 4562.75,
+        "silver": 7026.0,
+        "platinum": 1883.95,
+        "ironore": 99.41,
+        "silicon": 1260.0,
+        "crc": 1006.0,
+        "hbeam": 1190000.0,
+        "hrc": 1006.0,
+        "nickel": 16850.0,
+        "scrapheavya": 355000.0,
+        "scrapprime": 405000.0,
+        "sts304": 4500000.0,
+        "tungsten": 685000.0,
+        "wirerod": 821.0,
+        "zinc": 3865.5
+      },
+      "change_rate": {
+        "wti": "+1.0%",
+        "copper": "+3.6%",
+        "aluminum": "-0.9%",
+        "gold": "+2.2%",
+        "silver": "+4.6%",
+        "platinum": "-0.3%",
+        "ironore": "+1.1%",
+        "silicon": "+2.6%",
+        "crc": "+0.2%",
+        "hbeam": "+1.4%",
+        "hrc": "+2.5%",
+        "nickel": "+2.2%",
+        "scrapheavya": "+3.0%",
+        "scrapprime": "+2.6%",
+        "sts304": "+3.3%",
+        "tungsten": "+4.5%",
         "wirerod": "-0.5%",
         "zinc": "+2.5%"
       }
