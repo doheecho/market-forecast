@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-09-15 09:07",
+  "updated_at": "2026-09-16 10:40",
   "snapshots": [
     {
       "date": "2026-09-02",
@@ -241,6 +241,71 @@
         "tungsten": "+4.5%",
         "wirerod": "-0.5%",
         "zinc": "+2.5%"
+      }
+    },
+    {
+      "date": "2026-09-16",
+      "captured_at": "2026-09-16 10:40",
+      "file": "forecast/2026-09-16.json",
+      "target_6m": {
+        "wti": 86.1,
+        "copper": 15362.81,
+        "aluminum": 3169.96,
+        "gold": 4661.49,
+        "silver": 7252.51,
+        "platinum": 1880.23,
+        "ironore": 101.02,
+        "silicon": 1294.72,
+        "crc": 1038.23,
+        "hbeam": 1214439.65,
+        "hrc": 1038.23,
+        "nickel": 17227.93,
+        "scrapheavya": 360554.15,
+        "scrapprime": 413053.06,
+        "sts304": 4673563.06,
+        "tungsten": 680627.48,
+        "wirerod": 836.65,
+        "zinc": 3846.22
+      },
+      "current": {
+        "wti": 85.76,
+        "copper": 14535.0,
+        "aluminum": 3222.0,
+        "gold": 4562.75,
+        "silver": 7026.0,
+        "platinum": 1883.95,
+        "ironore": 99.41,
+        "silicon": 1260.0,
+        "crc": 1006.0,
+        "hbeam": 1190000.0,
+        "hrc": 1006.0,
+        "nickel": 16850.0,
+        "scrapheavya": 355000.0,
+        "scrapprime": 405000.0,
+        "sts304": 4500000.0,
+        "tungsten": 680000.0,
+        "wirerod": 821.0,
+        "zinc": 3865.5
+      },
+      "change_rate": {
+        "wti": "+0.4%",
+        "copper": "+5.7%",
+        "aluminum": "-1.6%",
+        "gold": "+2.2%",
+        "silver": "+3.2%",
+        "platinum": "-0.2%",
+        "ironore": "+1.6%",
+        "silicon": "+2.8%",
+        "crc": "+3.2%",
+        "hbeam": "+2.1%",
+        "hrc": "+3.2%",
+        "nickel": "+2.2%",
+        "scrapheavya": "+1.6%",
+        "scrapprime": "+2.0%",
+        "sts304": "+3.9%",
+        "tungsten": "+0.1%",
+        "wirerod": "+1.9%",
+        "zinc": "-0.5%"
       }
     }
   ]
