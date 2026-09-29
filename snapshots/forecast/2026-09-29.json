@@ -1,0 +1,1560 @@
+{
+  "captured_at": "2026-09-29 10:23",
+  "update_date": "2026-09-29",
+  "macro": {
+    "dxy": 101.22,
+    "us10y": 5.24,
+    "usdcny": 6.7037,
+    "usdkrw": 1359.78
+  },
+  "commodities": {
+    "wti": {
+      "name": "WTI 원유 (NYMEX Futures)",
+      "unit": "USD/bbl",
+      "current_price": 85.76,
+      "forecast_6m_target": 85.68,
+      "forecast_change_rate": "-0.1%",
+      "volatility_score": 70.2,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 85.46
+        },
+        {
+          "month": "2026-11",
+          "price": 84.95
+        },
+        {
+          "month": "2026-12",
+          "price": 84.14
+        },
+        {
+          "month": "2027-01",
+          "price": 83.83
+        },
+        {
+          "month": "2027-02",
+          "price": 84.63
+        },
+        {
+          "month": "2027-03",
+          "price": 85.68
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 100.07
+        },
+        {
+          "month": "2026-11",
+          "price": 108.31
+        },
+        {
+          "month": "2026-12",
+          "price": 116.84
+        },
+        {
+          "month": "2027-01",
+          "price": 123.11
+        },
+        {
+          "month": "2027-02",
+          "price": 130.79
+        },
+        {
+          "month": "2027-03",
+          "price": 136.79
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 75.72
+        },
+        {
+          "month": "2026-11",
+          "price": 70.43
+        },
+        {
+          "month": "2026-12",
+          "price": 68.75
+        },
+        {
+          "month": "2027-01",
+          "price": 67.84
+        },
+        {
+          "month": "2027-02",
+          "price": 67.14
+        },
+        {
+          "month": "2027-03",
+          "price": 65.09
+        }
+      ]
+    },
+    "copper": {
+      "name": "전기동 (LME 현물)",
+      "unit": "USD/ton",
+      "current_price": 14535.0,
+      "forecast_6m_target": 15383.5,
+      "forecast_change_rate": "+5.8%",
+      "volatility_score": 19.0,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 14678.06
+        },
+        {
+          "month": "2026-11",
+          "price": 14838.8
+        },
+        {
+          "month": "2026-12",
+          "price": 14824.71
+        },
+        {
+          "month": "2027-01",
+          "price": 15060.79
+        },
+        {
+          "month": "2027-02",
+          "price": 15197.06
+        },
+        {
+          "month": "2027-03",
+          "price": 15383.5
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 15805.04
+        },
+        {
+          "month": "2026-11",
+          "price": 16527.54
+        },
+        {
+          "month": "2026-12",
+          "price": 17261.45
+        },
+        {
+          "month": "2027-01",
+          "price": 17800.05
+        },
+        {
+          "month": "2027-02",
+          "price": 18440.91
+        },
+        {
+          "month": "2027-03",
+          "price": 18939.73
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 13602.07
+        },
+        {
+          "month": "2026-11",
+          "price": 13072.94
+        },
+        {
+          "month": "2026-12",
+          "price": 12894.02
+        },
+        {
+          "month": "2027-01",
+          "price": 12794.25
+        },
+        {
+          "month": "2027-02",
+          "price": 12716.29
+        },
+        {
+          "month": "2027-03",
+          "price": 12493.76
+        }
+      ]
+    },
+    "aluminum": {
+      "name": "알루미늄 (LME 현물)",
+      "unit": "USD/ton",
+      "current_price": 3222.0,
+      "forecast_6m_target": 3368.15,
+      "forecast_change_rate": "+4.5%",
+      "volatility_score": 42.1,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 3241.31
+        },
+        {
+          "month": "2026-11",
+          "price": 3276.65
+        },
+        {
+          "month": "2026-12",
+          "price": 3267.0
+        },
+        {
+          "month": "2027-01",
+          "price": 3307.37
+        },
+        {
+          "month": "2027-02",
+          "price": 3337.75
+        },
+        {
+          "month": "2027-03",
+          "price": 3368.15
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 3505.33
+        },
+        {
+          "month": "2026-11",
+          "price": 3665.52
+        },
+        {
+          "month": "2026-12",
+          "price": 3829.08
+        },
+        {
+          "month": "2027-01",
+          "price": 3948.27
+        },
+        {
+          "month": "2027-02",
+          "price": 4091.25
+        },
+        {
+          "month": "2027-03",
+          "price": 4201.54
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 3004.71
+        },
+        {
+          "month": "2026-11",
+          "price": 2878.38
+        },
+        {
+          "month": "2026-12",
+          "price": 2831.39
+        },
+        {
+          "month": "2027-01",
+          "price": 2802.4
+        },
+        {
+          "month": "2027-02",
+          "price": 2778.45
+        },
+        {
+          "month": "2027-03",
+          "price": 2721.73
+        }
+      ]
+    },
+    "gold": {
+      "name": "금 (LBMA 현물)",
+      "unit": "USD/ozt",
+      "current_price": 4562.75,
+      "forecast_6m_target": 4650.82,
+      "forecast_change_rate": "+1.9%",
+      "volatility_score": 62.7,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 4537.95
+        },
+        {
+          "month": "2026-11",
+          "price": 4524.52
+        },
+        {
+          "month": "2026-12",
+          "price": 4561.09
+        },
+        {
+          "month": "2027-01",
+          "price": 4597.66
+        },
+        {
+          "month": "2027-02",
+          "price": 4624.24
+        },
+        {
+          "month": "2027-03",
+          "price": 4650.82
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 5007.05
+        },
+        {
+          "month": "2026-11",
+          "price": 5238.82
+        },
+        {
+          "month": "2026-12",
+          "price": 5467.75
+        },
+        {
+          "month": "2027-01",
+          "price": 5620.73
+        },
+        {
+          "month": "2027-02",
+          "price": 5805.15
+        },
+        {
+          "month": "2027-03",
+          "price": 5935.47
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 4201.1
+        },
+        {
+          "month": "2026-11",
+          "price": 3998.36
+        },
+        {
+          "month": "2026-12",
+          "price": 3923.88
+        },
+        {
+          "month": "2027-01",
+          "price": 3878.25
+        },
+        {
+          "month": "2027-02",
+          "price": 3840.84
+        },
+        {
+          "month": "2027-03",
+          "price": 3756.26
+        }
+      ]
+    },
+    "silver": {
+      "name": "은 (LBMA 현물)",
+      "unit": "US￠/ozt",
+      "current_price": 7026.0,
+      "forecast_6m_target": 7331.66,
+      "forecast_change_rate": "+4.4%",
+      "volatility_score": 53.2,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 6953.44
+        },
+        {
+          "month": "2026-11",
+          "price": 7003.95
+        },
+        {
+          "month": "2026-12",
+          "price": 7109.52
+        },
+        {
+          "month": "2027-01",
+          "price": 7200.17
+        },
+        {
+          "month": "2027-02",
+          "price": 7280.88
+        },
+        {
+          "month": "2027-03",
+          "price": 7331.66
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 8242.72
+        },
+        {
+          "month": "2026-11",
+          "price": 8927.73
+        },
+        {
+          "month": "2026-12",
+          "price": 9631.77
+        },
+        {
+          "month": "2027-01",
+          "price": 10130.11
+        },
+        {
+          "month": "2027-02",
+          "price": 10740.86
+        },
+        {
+          "month": "2027-03",
+          "price": 11196.9
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 6133.56
+        },
+        {
+          "month": "2026-11",
+          "price": 5659.34
+        },
+        {
+          "month": "2026-12",
+          "price": 5497.9
+        },
+        {
+          "month": "2027-01",
+          "price": 5405.1
+        },
+        {
+          "month": "2027-02",
+          "price": 5331.64
+        },
+        {
+          "month": "2027-03",
+          "price": 5147.8
+        }
+      ]
+    },
+    "platinum": {
+      "name": "백금 (LPPM 현물)",
+      "unit": "USD/ozt",
+      "current_price": 1883.95,
+      "forecast_6m_target": 1926.92,
+      "forecast_change_rate": "+2.3%",
+      "volatility_score": 49.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 1873.63
+        },
+        {
+          "month": "2026-11",
+          "price": 1890.28
+        },
+        {
+          "month": "2026-12",
+          "price": 1901.94
+        },
+        {
+          "month": "2027-01",
+          "price": 1913.6
+        },
+        {
+          "month": "2027-02",
+          "price": 1920.26
+        },
+        {
+          "month": "2027-03",
+          "price": 1926.92
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 2155.41
+        },
+        {
+          "month": "2026-11",
+          "price": 2305.14
+        },
+        {
+          "month": "2026-12",
+          "price": 2458.21
+        },
+        {
+          "month": "2027-01",
+          "price": 2565.44
+        },
+        {
+          "month": "2027-02",
+          "price": 2696.95
+        },
+        {
+          "month": "2027-03",
+          "price": 2794.34
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 1673.94
+        },
+        {
+          "month": "2026-11",
+          "price": 1558.14
+        },
+        {
+          "month": "2026-12",
+          "price": 1515.4
+        },
+        {
+          "month": "2027-01",
+          "price": 1488.83
+        },
+        {
+          "month": "2027-02",
+          "price": 1466.83
+        },
+        {
+          "month": "2027-03",
+          "price": 1418.32
+        }
+      ]
+    },
+    "ironore": {
+      "name": "철광석 (중국 칭다오항 CFR Fines 현물)",
+      "unit": "USD/ton",
+      "current_price": 99.41,
+      "forecast_6m_target": 101.48,
+      "forecast_change_rate": "+2.1%",
+      "volatility_score": 52.4,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 98.73
+        },
+        {
+          "month": "2026-11",
+          "price": 100.3
+        },
+        {
+          "month": "2026-12",
+          "price": 99.87
+        },
+        {
+          "month": "2027-01",
+          "price": 100.99
+        },
+        {
+          "month": "2027-02",
+          "price": 100.36
+        },
+        {
+          "month": "2027-03",
+          "price": 101.48
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 105.82
+        },
+        {
+          "month": "2026-11",
+          "price": 109.22
+        },
+        {
+          "month": "2026-12",
+          "price": 112.69
+        },
+        {
+          "month": "2027-01",
+          "price": 115.11
+        },
+        {
+          "month": "2027-02",
+          "price": 118.09
+        },
+        {
+          "month": "2027-03",
+          "price": 120.33
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 93.67
+        },
+        {
+          "month": "2026-11",
+          "price": 90.12
+        },
+        {
+          "month": "2026-12",
+          "price": 88.52
+        },
+        {
+          "month": "2027-01",
+          "price": 87.35
+        },
+        {
+          "month": "2027-02",
+          "price": 86.3
+        },
+        {
+          "month": "2027-03",
+          "price": 84.42
+        }
+      ]
+    },
+    "silicon": {
+      "name": "실리콘 (중국 FOB Ferro 75% 현물)",
+      "unit": "USD/ton",
+      "current_price": 1260.0,
+      "forecast_6m_target": 1297.22,
+      "forecast_change_rate": "+3.0%",
+      "volatility_score": 22.4,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 1251.2
+        },
+        {
+          "month": "2026-11",
+          "price": 1272.4
+        },
+        {
+          "month": "2026-12",
+          "price": 1268.6
+        },
+        {
+          "month": "2027-01",
+          "price": 1284.81
+        },
+        {
+          "month": "2027-02",
+          "price": 1281.01
+        },
+        {
+          "month": "2027-03",
+          "price": 1297.22
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 1336.47
+        },
+        {
+          "month": "2026-11",
+          "price": 1383.27
+        },
+        {
+          "month": "2026-12",
+          "price": 1433.45
+        },
+        {
+          "month": "2027-01",
+          "price": 1473.01
+        },
+        {
+          "month": "2027-02",
+          "price": 1521.22
+        },
+        {
+          "month": "2027-03",
+          "price": 1561.2
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 1199.06
+        },
+        {
+          "month": "2026-11",
+          "price": 1159.02
+        },
+        {
+          "month": "2026-12",
+          "price": 1140.46
+        },
+        {
+          "month": "2027-01",
+          "price": 1126.76
+        },
+        {
+          "month": "2027-02",
+          "price": 1114.28
+        },
+        {
+          "month": "2027-03",
+          "price": 1090.68
+        }
+      ]
+    },
+    "crc": {
+      "name": "냉연코일 (MEPS 현물)",
+      "unit": "USD/ton",
+      "current_price": 1006.0,
+      "forecast_6m_target": 1038.23,
+      "forecast_change_rate": "+3.2%",
+      "volatility_score": 36.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 1002.6
+        },
+        {
+          "month": "2026-11",
+          "price": 1013.21
+        },
+        {
+          "month": "2026-12",
+          "price": 1013.33
+        },
+        {
+          "month": "2027-01",
+          "price": 1023.95
+        },
+        {
+          "month": "2027-02",
+          "price": 1030.59
+        },
+        {
+          "month": "2027-03",
+          "price": 1038.23
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 1057.71
+        },
+        {
+          "month": "2026-11",
+          "price": 1088.64
+        },
+        {
+          "month": "2026-12",
+          "price": 1120.63
+        },
+        {
+          "month": "2027-01",
+          "price": 1145.42
+        },
+        {
+          "month": "2027-02",
+          "price": 1174.71
+        },
+        {
+          "month": "2027-03",
+          "price": 1198.7
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 969.14
+        },
+        {
+          "month": "2026-11",
+          "price": 946.9
+        },
+        {
+          "month": "2026-12",
+          "price": 938.87
+        },
+        {
+          "month": "2027-01",
+          "price": 934.05
+        },
+        {
+          "month": "2027-02",
+          "price": 930.05
+        },
+        {
+          "month": "2027-03",
+          "price": 919.15
+        }
+      ]
+    },
+    "hbeam": {
+      "name": "H형강 소형/중형 (한국 1차 유통가)",
+      "unit": "KRW/ton",
+      "current_price": 1190000.0,
+      "forecast_6m_target": 1176939.65,
+      "forecast_change_rate": "-1.1%",
+      "volatility_score": 24.2,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 1183651.03
+        },
+        {
+          "month": "2026-11",
+          "price": 1177304.28
+        },
+        {
+          "month": "2026-12",
+          "price": 1183459.76
+        },
+        {
+          "month": "2027-01",
+          "price": 1177117.48
+        },
+        {
+          "month": "2027-02",
+          "price": 1173277.44
+        },
+        {
+          "month": "2027-03",
+          "price": 1176939.65
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 1263513.15
+        },
+        {
+          "month": "2026-11",
+          "price": 1303477.68
+        },
+        {
+          "month": "2026-12",
+          "price": 1343439.45
+        },
+        {
+          "month": "2027-01",
+          "price": 1371740.74
+        },
+        {
+          "month": "2027-02",
+          "price": 1405418.47
+        },
+        {
+          "month": "2027-03",
+          "price": 1430782.46
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 1131467.55
+        },
+        {
+          "month": "2026-11",
+          "price": 1097190.4
+        },
+        {
+          "month": "2026-12",
+          "price": 1084408.49
+        },
+        {
+          "month": "2027-01",
+          "price": 1076515.03
+        },
+        {
+          "month": "2027-02",
+          "price": 1069973.58
+        },
+        {
+          "month": "2027-03",
+          "price": 1054502.11
+        }
+      ]
+    },
+    "hrc": {
+      "name": "열연코일 (MEPS 현물)",
+      "unit": "USD/ton",
+      "current_price": 1006.0,
+      "forecast_6m_target": 1035.73,
+      "forecast_change_rate": "+3.0%",
+      "volatility_score": 36.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 1012.6
+        },
+        {
+          "month": "2026-11",
+          "price": 1019.71
+        },
+        {
+          "month": "2026-12",
+          "price": 1019.33
+        },
+        {
+          "month": "2027-01",
+          "price": 1026.45
+        },
+        {
+          "month": "2027-02",
+          "price": 1031.09
+        },
+        {
+          "month": "2027-03",
+          "price": 1035.73
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 1057.71
+        },
+        {
+          "month": "2026-11",
+          "price": 1088.64
+        },
+        {
+          "month": "2026-12",
+          "price": 1120.63
+        },
+        {
+          "month": "2027-01",
+          "price": 1145.42
+        },
+        {
+          "month": "2027-02",
+          "price": 1174.71
+        },
+        {
+          "month": "2027-03",
+          "price": 1198.7
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 969.14
+        },
+        {
+          "month": "2026-11",
+          "price": 946.9
+        },
+        {
+          "month": "2026-12",
+          "price": 938.87
+        },
+        {
+          "month": "2027-01",
+          "price": 934.05
+        },
+        {
+          "month": "2027-02",
+          "price": 930.05
+        },
+        {
+          "month": "2027-03",
+          "price": 919.15
+        }
+      ]
+    },
+    "nickel": {
+      "name": "니켈 (LME 현물)",
+      "unit": "USD/ton",
+      "current_price": 16850.0,
+      "forecast_6m_target": 17627.93,
+      "forecast_change_rate": "+4.6%",
+      "volatility_score": 29.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 17042.07
+        },
+        {
+          "month": "2026-11",
+          "price": 17209.17
+        },
+        {
+          "month": "2026-12",
+          "price": 17126.31
+        },
+        {
+          "month": "2027-01",
+          "price": 17393.48
+        },
+        {
+          "month": "2027-02",
+          "price": 17510.69
+        },
+        {
+          "month": "2027-03",
+          "price": 17627.93
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 18803.02
+        },
+        {
+          "month": "2026-11",
+          "price": 19888.07
+        },
+        {
+          "month": "2026-12",
+          "price": 20999.74
+        },
+        {
+          "month": "2027-01",
+          "price": 21793.91
+        },
+        {
+          "month": "2027-02",
+          "price": 22762.98
+        },
+        {
+          "month": "2027-03",
+          "price": 23497.38
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 15320.57
+        },
+        {
+          "month": "2026-11",
+          "price": 14449.59
+        },
+        {
+          "month": "2026-12",
+          "price": 14117.5
+        },
+        {
+          "month": "2027-01",
+          "price": 13905.54
+        },
+        {
+          "month": "2027-02",
+          "price": 13726.9
+        },
+        {
+          "month": "2027-03",
+          "price": 13338.78
+        }
+      ]
+    },
+    "scrapheavya": {
+      "name": "고철 중량A (한국 도매가)",
+      "unit": "KRW/ton",
+      "current_price": 355000.0,
+      "forecast_6m_target": 365554.15,
+      "forecast_change_rate": "+3.0%",
+      "volatility_score": 0.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 352592.24
+        },
+        {
+          "month": "2026-11",
+          "price": 355184.52
+        },
+        {
+          "month": "2026-12",
+          "price": 357776.86
+        },
+        {
+          "month": "2027-01",
+          "price": 362869.24
+        },
+        {
+          "month": "2027-02",
+          "price": 365461.67
+        },
+        {
+          "month": "2027-03",
+          "price": 365554.15
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 375293.42
+        },
+        {
+          "month": "2026-11",
+          "price": 386275.84
+        },
+        {
+          "month": "2026-12",
+          "price": 397400.62
+        },
+        {
+          "month": "2027-01",
+          "price": 405335.79
+        },
+        {
+          "month": "2027-02",
+          "price": 414940.89
+        },
+        {
+          "month": "2027-03",
+          "price": 422264.87
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 337957.58
+        },
+        {
+          "month": "2026-11",
+          "price": 327608.42
+        },
+        {
+          "month": "2026-12",
+          "price": 323293.78
+        },
+        {
+          "month": "2027-01",
+          "price": 320331.06
+        },
+        {
+          "month": "2027-02",
+          "price": 317720.98
+        },
+        {
+          "month": "2027-03",
+          "price": 312467.23
+        }
+      ]
+    },
+    "scrapprime": {
+      "name": "고철 생철 (한국 도매가)",
+      "unit": "KRW/ton",
+      "current_price": 405000.0,
+      "forecast_6m_target": 418053.06,
+      "forecast_change_rate": "+3.2%",
+      "volatility_score": 0.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 402592.07
+        },
+        {
+          "month": "2026-11",
+          "price": 407684.18
+        },
+        {
+          "month": "2026-12",
+          "price": 410276.34
+        },
+        {
+          "month": "2027-01",
+          "price": 415368.54
+        },
+        {
+          "month": "2027-02",
+          "price": 417960.77
+        },
+        {
+          "month": "2027-03",
+          "price": 418053.06
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 425671.7
+        },
+        {
+          "month": "2026-11",
+          "price": 436865.2
+        },
+        {
+          "month": "2026-12",
+          "price": 448207.47
+        },
+        {
+          "month": "2027-01",
+          "price": 456321.93
+        },
+        {
+          "month": "2027-02",
+          "price": 466134.61
+        },
+        {
+          "month": "2027-03",
+          "price": 473642.2
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 387536.63
+        },
+        {
+          "month": "2026-11",
+          "price": 376837.31
+        },
+        {
+          "month": "2026-12",
+          "price": 372323.78
+        },
+        {
+          "month": "2027-01",
+          "price": 369196.25
+        },
+        {
+          "month": "2027-02",
+          "price": 366426.4
+        },
+        {
+          "month": "2027-03",
+          "price": 360894.17
+        }
+      ]
+    },
+    "sts304": {
+      "name": "STS 304 CR 2mm (한국 도매가)",
+      "unit": "KRW/ton",
+      "current_price": 4500000.0,
+      "forecast_6m_target": 4673563.06,
+      "forecast_change_rate": "+3.9%",
+      "volatility_score": 19.3,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 4533022.0
+        },
+        {
+          "month": "2026-11",
+          "price": 4591072.6
+        },
+        {
+          "month": "2026-12",
+          "price": 4574151.9
+        },
+        {
+          "month": "2027-01",
+          "price": 4632260.01
+        },
+        {
+          "month": "2027-02",
+          "price": 4665397.03
+        },
+        {
+          "month": "2027-03",
+          "price": 4673563.06
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 4725734.94
+        },
+        {
+          "month": "2026-11",
+          "price": 4853762.07
+        },
+        {
+          "month": "2026-12",
+          "price": 4982615.88
+        },
+        {
+          "month": "2027-01",
+          "price": 5078069.41
+        },
+        {
+          "month": "2027-02",
+          "price": 5189989.09
+        },
+        {
+          "month": "2027-03",
+          "price": 5278042.57
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 4334742.2
+        },
+        {
+          "month": "2026-11",
+          "price": 4239001.93
+        },
+        {
+          "month": "2026-12",
+          "price": 4207185.87
+        },
+        {
+          "month": "2027-01",
+          "price": 4189880.04
+        },
+        {
+          "month": "2027-02",
+          "price": 4176476.69
+        },
+        {
+          "month": "2027-03",
+          "price": 4134877.75
+        }
+      ]
+    },
+    "tungsten": {
+      "name": "텅스텐 (중국 현물 Oxide WO3 99.95%)",
+      "unit": "RMB/mt",
+      "current_price": 680000.0,
+      "forecast_6m_target": 685627.48,
+      "forecast_change_rate": "+0.8%",
+      "volatility_score": 40.5,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 679653.52
+        },
+        {
+          "month": "2026-11",
+          "price": 676820.69
+        },
+        {
+          "month": "2026-12",
+          "price": 676501.58
+        },
+        {
+          "month": "2027-01",
+          "price": 683696.28
+        },
+        {
+          "month": "2027-02",
+          "price": 684904.89
+        },
+        {
+          "month": "2027-03",
+          "price": 685627.48
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 879876.84
+        },
+        {
+          "month": "2026-11",
+          "price": 1000162.25
+        },
+        {
+          "month": "2026-12",
+          "price": 1129396.43
+        },
+        {
+          "month": "2027-01",
+          "price": 1223600.54
+        },
+        {
+          "month": "2027-02",
+          "price": 1342723.96
+        },
+        {
+          "month": "2027-03",
+          "price": 1433285.6
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 545372.99
+        },
+        {
+          "month": "2026-11",
+          "price": 478535.12
+        },
+        {
+          "month": "2026-12",
+          "price": 456475.79
+        },
+        {
+          "month": "2027-01",
+          "price": 443969.06
+        },
+        {
+          "month": "2027-02",
+          "price": 434202.53
+        },
+        {
+          "month": "2027-03",
+          "price": 410332.04
+        }
+      ]
+    },
+    "wirerod": {
+      "name": "선재 (MEPS 현물)",
+      "unit": "USD/ton",
+      "current_price": 821.0,
+      "forecast_6m_target": 811.65,
+      "forecast_change_rate": "-1.1%",
+      "volatility_score": 36.8,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 818.61
+        },
+        {
+          "month": "2026-11",
+          "price": 814.21
+        },
+        {
+          "month": "2026-12",
+          "price": 807.32
+        },
+        {
+          "month": "2027-01",
+          "price": 805.43
+        },
+        {
+          "month": "2027-02",
+          "price": 808.54
+        },
+        {
+          "month": "2027-03",
+          "price": 811.65
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 844.4
+        },
+        {
+          "month": "2026-11",
+          "price": 857.81
+        },
+        {
+          "month": "2026-12",
+          "price": 871.52
+        },
+        {
+          "month": "2027-01",
+          "price": 881.87
+        },
+        {
+          "month": "2027-02",
+          "price": 894.11
+        },
+        {
+          "month": "2027-03",
+          "price": 903.92
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 802.69
+        },
+        {
+          "month": "2026-11",
+          "price": 791.22
+        },
+        {
+          "month": "2026-12",
+          "price": 786.57
+        },
+        {
+          "month": "2027-01",
+          "price": 783.46
+        },
+        {
+          "month": "2027-02",
+          "price": 780.73
+        },
+        {
+          "month": "2027-03",
+          "price": 774.6
+        }
+      ]
+    },
+    "zinc": {
+      "name": "아연 (LME 현물)",
+      "unit": "USD/ton",
+      "current_price": 3865.5,
+      "forecast_6m_target": 3961.22,
+      "forecast_change_rate": "+2.5%",
+      "volatility_score": 53.6,
+      "monthly_forecast_base": [
+        {
+          "month": "2026-10",
+          "price": 3886.56
+        },
+        {
+          "month": "2026-11",
+          "price": 3910.41
+        },
+        {
+          "month": "2026-12",
+          "price": 3884.3
+        },
+        {
+          "month": "2027-01",
+          "price": 3923.23
+        },
+        {
+          "month": "2027-02",
+          "price": 3942.21
+        },
+        {
+          "month": "2027-03",
+          "price": 3961.22
+        }
+      ],
+      "monthly_forecast_bull": [
+        {
+          "month": "2026-10",
+          "price": 4205.06
+        },
+        {
+          "month": "2026-11",
+          "price": 4397.47
+        },
+        {
+          "month": "2026-12",
+          "price": 4593.48
+        },
+        {
+          "month": "2027-01",
+          "price": 4737.69
+        },
+        {
+          "month": "2027-02",
+          "price": 4910.24
+        },
+        {
+          "month": "2027-03",
+          "price": 5045.26
+        }
+      ],
+      "monthly_forecast_bear": [
+        {
+          "month": "2026-10",
+          "price": 3613.71
+        },
+        {
+          "month": "2026-11",
+          "price": 3470.51
+        },
+        {
+          "month": "2026-12",
+          "price": 3420.9
+        },
+        {
+          "month": "2027-01",
+          "price": 3392.16
+        },
+        {
+          "month": "2027-02",
+          "price": 3368.99
+        },
+        {
+          "month": "2027-03",
+          "price": 3306.73
+        }
+      ]
+    }
+  }
+}
